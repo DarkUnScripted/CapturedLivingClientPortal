@@ -61,9 +61,11 @@ publishes to this repository's packages, so every push to `main` builds:
 
 - `ghcr.io/darkunscripted/capturedlivingclientportal/backend`
 - `ghcr.io/darkunscripted/capturedlivingclientportal/frontend`
-- `ghcr.io/darkunscripted/capturedlivingclientportal/ml`
 
-each tagged `:main` and `:sha-<short commit>`.
+each tagged `:main` and `:sha-<short commit>`. The optional face-detection
+sidecar keeps PicPeak's own `ml` image (`CL_ML_TAG`, default `main`): we don't
+change it, and the workflow only builds it when the `FACENET_ONNX_URL`
+repository variable is set.
 
 On the server, add to `.env`:
 
@@ -93,5 +95,5 @@ contain yet.
   `release-stable-daily.yml`, `whatsnew-highlights.yml`, `updater-image.yml`.
 - Settings → Secrets → Actions: add `SYNC_TOKEN` (fine-grained token for this
   repository with Contents, Pull requests and Workflows read/write).
-- Packages: make the three images public, or `docker login ghcr.io` on the
+- Packages: make the two images public, or `docker login ghcr.io` on the
   server with a `read:packages` token.

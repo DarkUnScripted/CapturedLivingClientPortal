@@ -26,5 +26,8 @@ services:
   frontend:
     image: ghcr.io/darkunscripted/capturedlivingclientportal/frontend:${CL_IMAGE_TAG:-main}
 
+  # The optional face-detection sidecar (`--profile faces`) stays on PicPeak's
+  # image: the fork never changes it, and our image workflow skips it without
+  # the FACENET_ONNX_URL variable. `main` matches the upstream line we follow.
   picpeak-ml:
-    image: ghcr.io/darkunscripted/capturedlivingclientportal/ml:${CL_IMAGE_TAG:-main}
+    image: ghcr.io/picpeak/picpeak/ml:${CL_ML_TAG:-main}

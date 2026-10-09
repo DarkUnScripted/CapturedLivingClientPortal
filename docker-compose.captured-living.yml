@@ -1,0 +1,33 @@
+# Captured Living override: run this fork's own images instead of PicPeak's.
+#
+# Layer it on top of the upstream production file, which stays untouched so
+# upstream merges never conflict here:
+#
+#   docker compose -f docker-compose.production.yml -f docker-compose.captured-living.yml up -d
+#
+# or set COMPOSE_FILE once in .env and use plain `docker compose`:
+#
+#   COMPOSE_FILE=docker-compose.production.yml:docker-compose.captured-living.yml
+#
+# The images are built by .github/workflows/docker-build.yml on every push to
+# main. CL_IMAGE_TAG picks which build runs:
+#   main          the newest build of main (default)
+#   sha-<short>   one exact commit, for pinning and rolling back
+#   v<version>    only if you cut your own release tags
+#
+# GHCR packages are private by default: either make the three packages public
+# on GitHub, or run `docker login ghcr.io` on the server with a token that has
+# read:packages.
+
+services:
+  backend:
+    image: ghcr.io/darkunscripted/capturedlivingclientportal/backend:${CL_IMAGE_TAG:-main}
+
+  frontend:
+    image: ghcr.io/darkunscripted/capturedlivingclientportal/frontend:${CL_IMAGE_TAG:-main}
+
+  # The optional face-detection sidecar (`--profile faces`) stays on PicPeak's
+  # image: the fork never changes it, and our image workflow skips it without
+  # the FACENET_ONNX_URL variable. `main` matches the upstream line we follow.
+  picpeak-ml:
+    image: ghcr.io/picpeak/picpeak/ml:${CL_ML_TAG:-main}

@@ -24,7 +24,10 @@ Fork-only files (PicPeak doesn't have them, so they never conflict):
 | --- | --- |
 | `docker-compose.captured-living.yml` | Points the server at our images |
 | `.github/workflows/upstream-sync.yml` | Weekly pull request with PicPeak's newest `main` |
+| `.github/workflows/deploy-vps.yml` | Deploys each build of `main` to the VPS |
+| `scripts/captured-living/deploy.sh` | Server side of a deploy: backup, pull, health check, rollback |
 | `docs/CAPTURED_LIVING_FORK.md` | This page |
+| `docs/CAPTURED_LIVING_SETUP.md` | Step-by-step setup of GitHub and the VPS |
 
 ## Getting updates
 

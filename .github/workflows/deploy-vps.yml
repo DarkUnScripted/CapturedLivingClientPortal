@@ -1,0 +1,115 @@
+name: Deploy to VPS
+
+# Captured Living fork only. Deploys our images to the VPS over SSH.
+#
+# - Automatically after every successful image build of main, once the
+#   repository variable AUTO_DEPLOY is set to `true`.
+# - By hand from the Actions tab (Run workflow) with any image tag:
+#   `sha-<7 chars>` for one exact build (also how you roll back), or `main`.
+#
+# The server-side steps (backup, pull, restart, health check, rollback) are in
+# scripts/captured-living/deploy.sh. Setup: docs/CAPTURED_LIVING_SETUP.md.
+#
+# Secrets: VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_KNOWN_HOSTS
+# Variables: VPS_PROJECT_DIR, VPS_SSH_PORT (optional, default 22), AUTO_DEPLOY
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Docker Images"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to deploy (sha-xxxxxxx, or main)'
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.repository == 'DarkUnScripted/CapturedLivingClientPortal' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (vars.AUTO_DEPLOY == 'true' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    # Settings › Environments › production: add yourself as a required
+    # reviewer there to approve every deploy by hand.
+    environment: production
+    env:
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+
+      - name: Pick the image tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          tag="${INPUT_TAG:-sha-${HEAD_SHA:0:7}}"
+          if [[ ! "$tag" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::'$tag' is not an image tag"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Deploying image tag $tag" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the settings
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER: ${{ secrets.VPS_USER }}
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN: ${{ secrets.VPS_KNOWN_HOSTS }}
+          DIR: ${{ vars.VPS_PROJECT_DIR }}
+        run: |
+          missing=()
+          [[ -n "$HOST" ]] || missing+=(secret:VPS_HOST)
+          [[ -n "$USER" ]] || missing+=(secret:VPS_USER)
+          [[ -n "$KEY" ]] || missing+=(secret:VPS_SSH_KEY)
+          [[ -n "$KNOWN" ]] || missing+=(secret:VPS_KNOWN_HOSTS)
+          [[ -n "$DIR" ]] || missing+=(variable:VPS_PROJECT_DIR)
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing ${missing[*]} (docs/CAPTURED_LIVING_SETUP.md)"
+            exit 1
+          fi
+
+      - name: Set up SSH
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER: ${{ secrets.VPS_USER }}
+          DIR: ${{ vars.VPS_PROJECT_DIR }}
+          PORT: ${{ vars.VPS_SSH_PORT || '22' }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          ssh_opts=(-i ~/.ssh/deploy_key -p "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          remote_dir=$(printf '%q' "$DIR")
+          ssh "${ssh_opts[@]}" "$USER@$HOST" "mkdir -p $remote_dir/.incoming"
+          for f in docker-compose.production.yml docker-compose.captured-living.yml; do
+            ssh "${ssh_opts[@]}" "$USER@$HOST" "cat > $remote_dir/.incoming/$f" < "$f"
+          done
+          ssh "${ssh_opts[@]}" "$USER@$HOST" "bash -s -- $(printf '%q ' "$TAG" "$DIR")" \
+            < scripts/captured-living/deploy.sh
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

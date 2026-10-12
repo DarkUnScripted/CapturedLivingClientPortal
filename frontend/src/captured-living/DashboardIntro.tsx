@@ -2,7 +2,7 @@
  * Captured Living: the top of the customer dashboard (fork-only file).
  *
  * A welcome line, a "book your next shoot" link and a highlight card for the
- * newest delivered gallery, as in the "Agent portal overview" design. It sits
+ * newest delivered gallery ("<address> is ready"), as in the "Agent portal overview" design. It sits
  * above PicPeak's own dashboard sections, which stay as they are; the single
  * mount point is in pages/customer/CustomerDashboardPage.tsx. Styling lives in
  * styles/captured-living.css (.cl-dash-*).
@@ -65,9 +65,13 @@ export const DashboardIntro: React.FC<DashboardIntroProps> = ({ events, onOpen, 
         <section className="cl-dash-latest" aria-labelledby="cl-dash-latest-title">
           <div>
             <div className="cl-dash-eyebrow">
-              {t('capturedLiving.dashboard.latest', { defaultValue: 'Ready to download' })}
+              {t('capturedLiving.dashboard.latest', { defaultValue: 'Latest delivery' })}
             </div>
-            <h2 id="cl-dash-latest-title" className="cl-dash-latest-title">{latest.eventName}</h2>
+            {/* One sentence, not the bare name: the gallery list below already
+                shows the name on its own (and PicPeak's tests look for it once). */}
+            <h2 id="cl-dash-latest-title" className="cl-dash-latest-title">
+              {t('capturedLiving.dashboard.latestTitle', { defaultValue: '{{name}} is ready', name: latest.eventName })}
+            </h2>
             {latestDate && <div className="cl-dash-latest-meta">{latestDate}</div>}
           </div>
           <button

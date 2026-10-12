@@ -78,6 +78,20 @@
 
 /* ---- Hero ----------------------------------------------------------------- */
 
+/* Full-bleed hero: the frame breaks out of the centred container to the
+   viewport edges. `clip` (unlike `hidden`) trims the scrollbar-width overflow
+   of 100vw without turning the page into a scroll container, so the sticky
+   top bar keeps working. */
+.gallery-page {
+  overflow-x: clip;
+}
+
+.gallery-page .gallery-hero-frame {
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  max-height: 760px;
+}
+
 /* A lighter veil: the property photo is the point. */
 .gallery-page .gallery-hero-overlay {
   opacity: 0.12 !important;
@@ -152,6 +166,18 @@
 
   .gallery-page .gallery-hero-meta > span {
     font-size: 1.05rem;
+  }
+}
+
+/* On wide screens the panel and the scroll hint line up with the page
+   content (the .container is max-w-7xl, 80rem, with 2rem padding). */
+@media (min-width: 1024px) {
+  .gallery-page .gallery-hero-content {
+    padding-left: max(2.5rem, calc((100vw - 80rem) / 2 + 2rem));
+  }
+
+  .gallery-page .gallery-hero-scroll {
+    right: max(1.5rem, calc((100vw - 80rem) / 2 + 2rem));
   }
 }
 

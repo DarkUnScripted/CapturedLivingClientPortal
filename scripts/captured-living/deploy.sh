@@ -18,6 +18,14 @@
 
 set -euo pipefail
 
+# The script arrives on stdin (`bash -s`), and bash reads it line by line while
+# running it. Wrapping everything in main() makes bash read the whole file
+# before the first command runs, and detaching stdin keeps commands such as
+# `docker compose exec` from swallowing the rest of the script (which once made
+# a deploy stop silently after the backup and still report success).
+main() {
+exec </dev/null
+
 TAG="${1:?usage: deploy.sh <image-tag> <project-dir>}"
 DIR="${2:?usage: deploy.sh <image-tag> <project-dir>}"
 HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-300}"
@@ -118,3 +126,6 @@ if [[ -n "$previous" ]]; then
 fi
 echo "If the new build changed the database, restore $DIR/$backup_dir/database.dump (docs/CAPTURED_LIVING_SETUP.md, Rolling back)." >&2
 exit 1
+}
+
+main "$@"

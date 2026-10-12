@@ -47,6 +47,7 @@ const watermarkService = require('../services/watermarkService');
 const watermarkGeneratorService = require('../services/watermarkGeneratorService');
 
 const { getStoragePath } = require('../config/storage');
+const { normalizeStatusColors, STATUS_KEYS } = require('../utils/statusColors');
 
 // Reserved first-run bootstrap keys — never writable through the generic
 // settings upserts in this file: setup_wizard_completed is a one-way marker
@@ -152,6 +153,9 @@ const TRACKER_CODE_KEYS = new Set([
   'analytics_umami_url',
   'analytics_rybbit_url',
   'analytics_custom_head_html',
+  // Decides whether visitors who sent Do Not Track are counted (issue 1921):
+  // the same kind of decision as where the events go.
+  'analytics_honor_do_not_track',
 ]);
 const parseStoredSetting = (row) => {
   if (!row) return undefined;
@@ -166,6 +170,7 @@ const effectiveMissingSetting = async (key) => {
     return umami === true || umami === 'true' ? 'umami' : 'none';
   }
   if (key === 'analytics_umami_enabled') return false;
+  if (key === 'analytics_honor_do_not_track') return true;
   return null;
 };
 // A rule names either the owning `perm`, or `superAdmin: true` when the key is
@@ -230,6 +235,15 @@ const rejectUnauthorizedProtectedKeys = async (settings, req, res) => {
       error: 'Custom analytics scripts are no longer supported; choose Umami, Rybbit or none',
       code: 'CUSTOM_ANALYTICS_DISABLED',
     });
+    return true;
+  }
+  // Also shared by every generic writer, so the stored value has one shape
+  // whichever endpoint wrote it: a strict boolean (issue 1921). The client
+  // reads it through the public settings and the relay reads it directly;
+  // a string would let the two disagree about who is counted.
+  if (Object.hasOwn(settings, 'analytics_honor_do_not_track')
+    && typeof settings.analytics_honor_do_not_track !== 'boolean') {
+    res.status(400).json({ error: 'analytics_honor_do_not_track must be true or false', code: 'BAD_BOOLEAN' });
     return true;
   }
   return false;
@@ -683,6 +697,7 @@ router.get('/transfers',
         accept_all: policy.acceptAll,
         allowed_types: policy.allowedTypes,
         max_size_mb: policy.maxSizeMb,
+        max_files: policy.maxFiles,
       });
     } catch (error) {
       errorResponse(res, error, 500, 'Failed to load transfer settings');
@@ -695,7 +710,7 @@ router.put('/transfers',
   requireFlag('transfers'),
   async (req, res) => {
     try {
-      const { normalizeAllowedTypes } = require('../services/transferUploadPolicy');
+      const { normalizeAllowedTypes, normalizeMaxFiles, MAX_FILES_CEILING } = require('../services/transferUploadPolicy');
       const has = (k) => Object.prototype.hasOwnProperty.call(req.body, k);
 
       // Validate EVERY field before writing any of them. Interleaving the two
@@ -731,6 +746,19 @@ router.put('/transfers',
           return res.status(400).json({ error: 'Maximum file size must be between 1 and 100000 MB', code: 'BAD_SIZE' });
         }
         writes.push(['transfer_max_upload_size_mb', JSON.stringify(mb), 'number']);
+      }
+
+      // The default number of files per upload round (issue 1914); a file
+      // request can carry its own value.
+      if (has('max_files')) {
+        const files = normalizeMaxFiles(req.body.max_files);
+        if (!files) {
+          return res.status(400).json({
+            error: `Maximum files per upload must be a whole number between 1 and ${MAX_FILES_CEILING}`,
+            code: 'BAD_FILE_COUNT',
+          });
+        }
+        writes.push(['transfer_upload_max_files', JSON.stringify(files), 'number']);
       }
 
       const updated = [];
@@ -1232,6 +1260,9 @@ router.put('/branding', adminAuth, requirePermission('settings.edit'), async (re
       logo_display_mode,
       hide_powered_by,
       force_color_mode,
+      // Status colours (Branding › Colours): one hue per meaning, applied
+      // admin-wide and on public pages. Partial object; missing = default.
+      status_colors,
       // Login-page-only branding (#354 follow-up). Both toggles apply
       // exclusively to /admin/login and /customer/login — the gallery
       // and admin chrome use their own logo_size / logo_max_height.
@@ -1256,6 +1287,15 @@ router.put('/branding', adminAuth, requirePermission('settings.edit'), async (re
       // Info banner (#932). Markdown only, same sanitiser path as promo.
       info_markdown
     } = req.body;
+
+    // Status colours: refuse a malformed set rather than store a cleaned one,
+    // which would wipe the saved hues and still report success.
+    if (status_colors !== undefined) {
+      const bad = !status_colors || typeof status_colors !== 'object' || Array.isArray(status_colors)
+        || Object.entries(status_colors).some(([key, value]) => !STATUS_KEYS.includes(key)
+          || (value != null && value !== '' && !normalizeStatusColors({ [key]: value })[key]));
+      if (bad) return res.status(400).json({ error: 'Status colours must be #rrggbb values for success, warning, danger, info or storno' });
+    }
 
     // Normalize force_color_mode: only 'dark' | 'light' | null are valid.
     const normalizedForceColorMode = force_color_mode === 'dark'
@@ -1308,6 +1348,7 @@ router.put('/branding', adminAuth, requirePermission('settings.edit'), async (re
       logo_display_mode,
       hide_powered_by,
       force_color_mode: normalizedForceColorMode,
+      ...(status_colors !== undefined && { status_colors: normalizeStatusColors(status_colors) }),
       // Login-only knobs (only persist when the request actually
       // included the key, so a partial PUT from another tab doesn't
       // accidentally clear them).

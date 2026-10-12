@@ -78,10 +78,41 @@ afterAll(async () => {
 
 afterEach(() => {
   fs.rmSync(path.join(base, 'source'), { recursive: true, force: true });
-  fs.rmSync(path.join(base, 'target'), { recursive: true, force: true });
+  // This suite reuses one target database. Its durable control row must keep
+  // the same volume marker and lifetime-lease inodes between offline restores.
+  // Empty only business files; deleting the maintenance directory would make
+  // the next case a different, correctly rejected, authoritative installation.
+  const targetRoot = path.join(base, 'target', 'root');
+  if (fs.existsSync(targetRoot)) {
+    for (const entry of fs.readdirSync(targetRoot)) {
+      if (entry !== '.picpeak-maintenance') {
+        fs.rmSync(path.join(targetRoot, entry), { recursive: true, force: true });
+      }
+    }
+  }
+  fs.rmSync(path.join(base, 'target', 'app'), { recursive: true, force: true });
 });
 
 describe('legacy-root documents in archives', () => {
+  it('deduplicates identical mirrored legacy documents into an importable portable catalogue', async () => {
+    const { createPicpeak } = require('../../src/services/picpeakExportService');
+    const { importFromPicpeak } = require('../../src/services/picpeakImportService');
+    const { root, legacy } = useInstall('source');
+    const rel = 'business-docs/inbound/2026/same.pdf';
+    const legacyFile = path.join(legacy, rel);
+    write(legacyFile, 'IDENTICAL'); write(path.join(root, rel), 'IDENTICAL');
+    await db('inbound_documents').del();
+    await db('inbound_documents').insert({ original_filename: 'mirror', file_path: legacyFile });
+    const { filePath, manifest } = await createPicpeak({ includePhotos: false });
+    try {
+      expect(manifest.files.filter(file => file.path === rel)).toHaveLength(1);
+      fs.rmSync(path.join(base, 'source'), { recursive: true, force: true });
+      useInstall('target');
+      await importFromPicpeak({ picpeakPath: filePath });
+      expect(await contents()).toEqual({ mirror: 'IDENTICAL' });
+    } finally { fs.rmSync(path.dirname(filePath), { recursive: true, force: true }); }
+  });
+
   it('a .picpeak restore on another machine opens every document with its own bytes', async () => {
     const { createPicpeak } = require('../../src/services/picpeakExportService');
     const { importFromPicpeak } = require('../../src/services/picpeakImportService');

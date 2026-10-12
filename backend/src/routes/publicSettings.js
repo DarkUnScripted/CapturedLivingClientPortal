@@ -2,6 +2,7 @@ const express = require('express');
 const { db, withRetry } = require('../database/db');
 const logger = require('../utils/logger');
 const { normaliseDownloadLimit } = require('../services/downloadQuota');
+const { normalizeStatusColors } = require('../utils/statusColors');
 const router = express.Router();
 
 // Get public settings (branding and theme)
@@ -135,6 +136,9 @@ router.get('/', async (req, res) => {
         : settingsObject.branding_force_color_mode === 'light'
           ? 'light'
           : null,
+      // Status colours (Branding › Colours). Only the hues the studio picked;
+      // the frontend falls back to tokens.css for the rest.
+      branding_status_colors: normalizeStatusColors(settingsObject.branding_status_colors),
       // Login-page-only branding (#354 follow-up). Applies exclusively
       // to /admin/login and /customer/login — the rest of the app keeps
       // using branding_logo_size / branding_logo_max_height. Default
@@ -196,6 +200,11 @@ router.get('/', async (req, res) => {
           ? 'umami'
           : 'none';
       })(),
+      // Whether the client drops events for a browser that sends Do Not Track
+      // (issue 1921). On unless switched off; Global Privacy Control is
+      // always honoured and has no switch.
+      analytics_honor_do_not_track: settingsObject.analytics_honor_do_not_track !== false
+        && settingsObject.analytics_honor_do_not_track !== 'false',
       // Never distribute administrator-supplied executable HTML, including
       // legacy rows written through another generic settings endpoint.
       analytics_custom_head_html: '',

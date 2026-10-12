@@ -1385,7 +1385,7 @@
       "title": "SEO e Robots",
       "indexingTitle": "Indexação em Buscadores",
       "allowIndexing": "Permitir indexação em mecanismos de busca",
-      "allowIndexingHelp": "Se desativado, crawlers serão bloqueados via robots.txt. Recomendado desativar para galerias privadas.",
+      "allowIndexingHelp": "Se desativado, nenhuma página pode aparecer nos resultados de busca. Se ativado, apenas a página inicial pública. Galerias, links de compartilhamento e páginas de login nunca são indexados.",
       "sitemapUrl": "URL do Sitemap",
       "sitemapUrlHelp": "Opcional. Adicionado ao robots.txt se fornecido.",
       "aiBlockingTitle": "Bloqueio de IA e Bots",
@@ -1519,7 +1519,6 @@
         "clients": "Clientes"
       },
       "status": {
-        "stable": "estável",
         "beta": "beta",
         "new": "novo",
         "experimental": "experimental",
@@ -3592,8 +3591,7 @@
       "calendar": "Calendário",
       "quotes": "Orçamentos",
       "bills": "Faturas",
-      "profile": "Perfil",
-      "soon": "Em breve"
+      "profile": "Perfil"
     },
     "comingSoon": {
       "tag": "Em breve"

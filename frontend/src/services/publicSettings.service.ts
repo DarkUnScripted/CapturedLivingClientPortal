@@ -31,6 +31,8 @@ export interface PublicSettings {
    * AdminDarkModeContext + ThemeContext both honor this.
    */
   branding_force_color_mode?: 'dark' | 'light' | null;
+  /** Status hues picked in Branding › Colours; missing keys use tokens.css. */
+  branding_status_colors?: Partial<Record<'success' | 'warning' | 'danger' | 'info' | 'storno', string>>;
   /**
    * Login-page-only branding (#354 follow-up). Applies exclusively to
    * /admin/login and /customer/login. Defaults: frame on, size 'medium'.
@@ -70,6 +72,7 @@ export interface PublicSettings {
   // Pluggable trackers (#663 Phase 1). Only the provider is public; a
   // missing value falls back to the legacy umami_enabled flag.
   analytics_tracker_provider?: 'none' | 'umami' | 'rybbit';
+  analytics_honor_do_not_track?: boolean;
   // Deprecated compatibility field: always empty; custom scripts are disabled.
   analytics_custom_head_html?: string;
   // Upload settings

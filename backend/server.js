@@ -68,7 +68,10 @@ const helmet = require('helmet');
 const compression = require('compression');
 const cors = require('cors');
 const path = require('path');
-const { initializeDatabase, db } = require('./src/database/db');
+const { initializeDatabase, db, enableApplicationWorkOwnership } = require('./src/database/db');
+const applicationWork = require('./src/services/activeApplicationWork');
+const restoreCoordinator = require('./src/services/portableRestoreCoordinator');
+const { createApplicationWorkMiddleware, ownRouteHandlers } = require('./src/middleware/applicationWork');
 const {
   getFrontendBaseUrlSync,
   getAbsoluteFrontendUrl,
@@ -269,6 +272,27 @@ const corsOptions = {
 };
 
 // Only attach CORS to API endpoints, not static assets
+// This is a dedicated exact-path capability surface, never an admin-prefix or
+// caller-header exemption to ordinary admission. It also precedes
+// analytics, body parsing, static rendering and every application API.
+app.use(require('./src/routes/portableRestoreControl').createRestoreControlRouter({ cors: cors(corsOptions) }));
+app.use(require('./src/routes/portableRestoreShell').createRestoreShellRouter({ shouldServe: () => restoreCoordinator.isFenced() }));
+// A restore keeps this process alive and busy on purpose. While one runs the
+// health probes answer 200 from memory, outside the request fence and without
+// touching the database, so a health-based restarter does not kill it halfway.
+app.get(['/health', '/api/health'], (req, res, next) => {
+  if (!restoreCoordinator.isFenced()) return next();
+  return res.json({
+    status: 'ok',
+    maintenance: restoreCoordinator.status().restartRequired ? 'restart_required' : 'restoring',
+    timestamp: new Date().toISOString(),
+    pid: process.pid,
+    uptime: process.uptime()
+  });
+});
+// The fence is a flag in memory, refreshed by the coordinator's own watch;
+// an ordinary request never reads the control row.
+app.use(createApplicationWorkMiddleware({ enabled: () => restoreCoordinator.tracking() }));
 app.use('/api', cors(corsOptions));
 // Handle preflight explicitly for API paths
 app.options('/api/*', cors(corsOptions));
@@ -479,6 +503,8 @@ async function handlePublicSiteRequest(req, res, next) {
     const payload = await getPublicSitePayload();
 
     if (!payload.enabled) {
+      // The root is crawlable (robotsTxtService), so say it here too.
+      res.setHeader('X-Robots-Tag', 'noindex');
       res.redirect(302, '/admin/login');
       return;
     }
@@ -487,7 +513,7 @@ async function handlePublicSiteRequest(req, res, next) {
     try {
       const seoRows = await db('app_settings')
         .where('setting_type', 'seo')
-        .whereIn('setting_key', ['seo_meta_noindex', 'seo_meta_nofollow', 'seo_meta_noai'])
+        .whereIn('setting_key', ['seo_allow_indexing', 'seo_meta_noindex', 'seo_meta_nofollow', 'seo_meta_noai'])
         .select('setting_key', 'setting_value');
       const seoSettings = {};
       for (const row of seoRows) {
@@ -505,7 +531,15 @@ async function handlePublicSiteRequest(req, res, next) {
     // link for self-hosted faces) or a SEO toggle must stop answering 304 to
     // clients that cached the previous HTML, or they keep it until a
     // settings change happens to move the payload hash.
-    const etag = `W/"${require('crypto').createHash('sha1').update(document).digest('hex')}"`;
+    //
+    // robots.txt lets crawlers fetch the root either way, so with indexing
+    // off the landing page has to refuse indexing itself. That is a header,
+    // not part of the document, so it goes into the validator as well and is
+    // sent on a 304 too: otherwise a crawler that cached the page while
+    // indexing was on keeps revalidating its indexable copy.
+    const noindex = payload.seoSettings?.seo_allow_indexing !== true;
+    if (noindex) res.setHeader('X-Robots-Tag', 'noindex');
+    const etag = `W/"${require('crypto').createHash('sha1').update(document).update(noindex ? 'noindex' : 'index').digest('hex')}"`;
     if (req.headers['if-none-match'] === etag) {
       res.status(304).end();
       return;
@@ -771,6 +805,7 @@ app.get('/s/:shortSlug', async (req, res) => {
         meta.url = `${base}/s/${row.short_slug}`;
         res.set('Cache-Control', 'public, max-age=300');
         res.set('Content-Type', 'text/html; charset=utf-8');
+        res.set('X-Robots-Tag', 'noindex');
         res.send(renderOgHtml(meta));
         // Hit accounting is fire-and-forget — don't block the bot.
         galleryShortUrlService.recordHit(row.id).catch(() => {});
@@ -1045,6 +1080,9 @@ try {
     // revalidate so a redeploy is picked up, while the hashed assets below
     // cache immutably.
     const sendSpa = (res) => {
+      // Only the landing page is ever indexable; the app shell never is
+      // (nginx parity: `location = /index.html`).
+      res.setHeader('X-Robots-Tag', 'noindex');
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.type('html').send(spaHtml);
     };
@@ -1179,6 +1217,7 @@ async function stopServer() {
       await Promise.all([close, require('./src/services/serviceShutdown').stopServices()]);
     } finally {
       clearTimeout(timeout);
+      await restoreCoordinator.stop();
       // Always release the pool: a rejected service stop must not leave
       // ref'd sockets keeping the process alive until SIGKILL.
       await db.destroy();
@@ -1188,12 +1227,43 @@ async function stopServer() {
 }
 
 // Initialize services
+// Request and query tracking exists so a coordinated restore can wait for
+// accepted work. It is installed only where such a restore can run.
+let restoreWorkTracked = false;
+function trackRestoreWork() {
+  if (restoreWorkTracked) return;
+  restoreWorkTracked = true;
+  enableApplicationWorkOwnership();
+  ownRouteHandlers(app);
+}
+
+// Only reached when a previous run left a restore fence behind.
+async function recoverPendingRestore() {
+  trackRestoreWork();
+  // As for the ordinary listener: bootstrap authority must not become the
+  // default authority of an incoming request.
+  httpServer = await applicationWork.runUncontrolled(() => require('./src/database/crmAccess').withoutCrmContext(
+    () => new Promise((resolve, reject) => {
+      const listener = app.listen(PORT, LISTEN_HOST, () => { listener.removeListener('error', reject); resolve(listener); });
+      listener.once('error', reject);
+    })));
+  logger.warn(`A portable restore was interrupted; serving the maintenance page on port ${PORT} until it is recovered`);
+  await restoreCoordinator.initialize();
+  await restoreCoordinator.waitForStartupAdmission();
+}
+
 function startServer() {
   return require('./src/database/crmAccess').withTrustedCrmAccess('application bootstrap', startServerInternal);
 }
 
 async function startServerInternal() {
   try {
+    // A portable restore interrupted by a crash or reboot leaves the instance
+    // fenced. Only then does the listener open before the database is ready:
+    // it serves the maintenance page and the restore progress while the
+    // restore is recovered. For every other boot this is one file lookup.
+    if (await restoreCoordinator.pendingAtBoot()) await recoverPendingRestore();
+
     // Initialize database
     await initializeDatabase();
     await require('./src/utils/authSecurity').assertAuthSecuritySchema();
@@ -1215,6 +1285,8 @@ async function startServerInternal() {
     // Initialize auth security cleanup job
     const { initializeCleanupJob } = require('./src/utils/authSecurity');
     initializeCleanupJob();
+    require('./src/middleware/sessionTimeout').startSessionCleanup();
+    require('./src/services/chunkedUploadService').start();
     
     require('./src/utils/cleanupTempUploads').startTempUploadCleanup();
 
@@ -1466,9 +1538,17 @@ async function startServerInternal() {
     // setting every tick, so nothing runs until an admin switches it on.
     require('./src/services/videoRenditionQueue').start();
 
-    // Bootstrap/cron authority must not become the default authority of an
-    // incoming HTTP request. Its authentication/capability middleware owns it.
-    httpServer = await require('./src/database/crmAccess').withoutCrmContext(() => app.listen(PORT, LISTEN_HOST, () => {
+    // Coordinated portable restore is optional. Where this host cannot run it
+    // one startup line says why, the import answers 503 and nothing else
+    // changes; where it can, requests are tracked so a restore can drain them.
+    // Never a reason not to start, and never awaited.
+    restoreCoordinator.activate({
+      resumeServices: () => require('./src/services/serviceShutdown').resumeServices(),
+      forceClose: () => httpServer?.closeAllConnections(),
+    }).then((capability) => { if (capability.available) trackRestoreWork(); })
+      .catch((err) => logger.warn('Portable restore check failed at boot', { error: err.message }));
+
+    const listening = () => {
       logger.info(`Server running on ${LISTEN_HOST || 'all interfaces'}:${PORT}`);
       logger.info(`Admin interface: ${process.env.ADMIN_URL || 'http://localhost:3000'}`);
       logger.info(`Frontend: ${process.env.FRONTEND_URL || 'http://localhost:3001'}`);
@@ -1484,8 +1564,14 @@ async function startServerInternal() {
           : `  One-time setup token:  ${setupToken}\n  (could not write the token file, so it is shown here)`;
         console.log(`\n${line}\n  PicPeak first-run setup — no admin account yet.\n  Open:                  ${url}\n${secretLine}\n${line}\n`);
       }
-    }));
+    };
+    // Already listening when an interrupted restore had to be recovered first.
+    // Bootstrap/cron authority must not become the default authority of an
+    // incoming HTTP request. Its authentication/capability middleware owns it.
+    if (httpServer) listening();
+    else httpServer = await require('./src/database/crmAccess').withoutCrmContext(() => app.listen(PORT, LISTEN_HOST, listening));
   } catch (error) {
+    if (shutdownPromise) { await shutdownPromise; return; }
     logger.error('Failed to start server:', error);
     await stopServer();
     process.exitCode = 1;

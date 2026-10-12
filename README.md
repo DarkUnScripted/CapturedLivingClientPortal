@@ -58,11 +58,19 @@ cd picpeak
 # (domain, SMTP, storage paths, …) — nothing is required.
 cp .env.example .env
 
-# Start with Docker Compose
+# Use the prebuilt images for this and every later compose command
+# (logs, pull, down, …) — the installer sets the same line
+echo "COMPOSE_FILE=docker-compose.production.yml" >> .env
+
+# Start
 docker compose up -d
 
 # Access at http://localhost:3000
 ```
+
+`docker-compose.production.yml` pulls PicPeak's prebuilt images from GHCR (Postgres and Redis come from Docker Hub), so nothing is compiled on your machine. The plain `docker-compose.yml` builds from source and is meant for development — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Already running the old quick start** (plain `docker compose up -d`, built from source)? Add the same `COMPOSE_FILE` line to `.env` and run `docker compose up -d --remove-orphans`. Both files use the same named volumes and the same `./storage`, `./data`, `./logs` and `./backup` folders, so no data moves; `--remove-orphans` removes the development-only `mailhog` container. The production file takes its image tag from `PICPEAK_CHANNEL`, so you move from whatever was checked out to the `stable` channel unless you set `PICPEAK_CHANNEL=beta`.
 
 On first start, open **http://localhost:3000/admin** and follow the in-browser setup to create your admin account. Full details — the one-time setup token, Docker file permissions, and ARM64 notes — are in **[First-run setup](https://docs.picpeak.app/getting-started/first-login)**.
 
@@ -78,7 +86,7 @@ proxy in front of the frontend, set `TRUST_PROXY=2`, `COOKIE_SECURE=true` and
 and configure the outer proxy to append or overwrite forwarding headers using
 the real client address. The installer selects these settings in proxy mode.
 
-> **Updating / release channels:** set `PICPEAK_CHANNEL` (`stable` default, or `beta`) in `.env`, then `docker compose pull && docker compose up -d`. To update from the admin UI instead, enable [in-app updates](docs/self-update.md). See [RELEASING.md](RELEASING.md) for the promotion cadence.
+> **Updating / release channels:** set `PICPEAK_CHANNEL` (`stable` default, or `beta`) in `.env`, then `docker compose pull && docker compose up -d` (with `COMPOSE_FILE` set as above; otherwise add `-f docker-compose.production.yml` to every command). To update from the admin UI instead, enable [in-app updates](docs/self-update.md). See [RELEASING.md](RELEASING.md) for the promotion cadence.
 
 > [!NOTE]
 > **Recommended hardening:** an existing install keeps working without
@@ -99,7 +107,7 @@ For a home server, a NAS, or a single small studio, the all-in-one image runs th
 docker run -d --name picpeak -p 127.0.0.1:3000:3000 \
   -e COOKIE_SECURE=auto \
   -v picpeak:/data \
-  ghcr.io/picpeak/picpeak/aio:main
+  ghcr.io/picpeak/picpeak/aio:stable
 ```
 
 The cookie mode above (also the default) suits this loopback-only HTTP quick
@@ -108,7 +116,7 @@ JWT secret is generated on first start and kept on the volume.
 
 Then open **http://localhost:3000/admin** and read the setup token with `docker exec picpeak cat /data/db/SETUP_TOKEN`, or open `db/SETUP_TOKEN` on the volume with any file manager if the host has no shell.
 
-`:main` is the active-development tag, and today it is the only one the all-in-one image has — `Dockerfile.aio` landed after the current stable release, so `:stable` and `:latest` first appear for this image once the aio build reaches the `stable` branch. Switch to `:stable` then, or pin a published version tag if you would rather not track `main`.
+The same image is on Docker Hub as `picpeak/aio:stable`. NAS container apps (Synology Container Manager, QNAP Container Station, UGREEN Docker) search Docker Hub by default, so search for `picpeak/aio`, pick the `stable` tag, map port `3000` and mount one volume at `/data`. Use `:beta` to follow the beta channel, or pin a published version tag.
 
 The compose stack above is still the right choice for anything busier — SQLite takes one writer at a time, and Postgres is what scales. You can move to it later without reinstalling: take a `.picpeak` backup and restore it into the full stack. See **[Single-container install](https://docs.picpeak.app/deployment/single-container)** for the volume layout, the external-Postgres variant, TLS, and the limits.
 
@@ -239,6 +247,15 @@ Full documentation lives at **[docs.picpeak.app](https://docs.picpeak.app)** —
 
 **Project meta:** [Support](SUPPORT.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE) · [Security](SECURITY.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
+### S3-primary backup and recovery
+
+`STORAGE_BACKEND=s3` selects the live media store (`STORAGE_S3_*`); the backup destination (`backup_s3_*`, local, or rsync) is independent. Standard backups and photo-inclusive `.picpeak` exports capture managed originals, archives, derived media, customer documents and both transfer attachment roots from the live adapter, preserving object headers and custom metadata. CRM PDFs/signatures and static uploads remain local and are included alongside those objects. Administrator path toggles/exclusions and document-only or row-only portable exports remain intentional selection policies.
+
+Capturing S3-primary backups uses a private temporary tree: provide temporary disk capacity for the entire selected file estate, not just one object. Missing required objects, interrupted capture or publication, and reference changes during a database dump fail the run rather than produce a completed incomplete backup. Scheduled database dumps record their storage references; after upgrading, create a new database dump before reusing a pre-upgrade dump with inline dumping disabled.
+
+Before restoring on a fresh host, configure the target `STORAGE_BACKEND` and `STORAGE_S3_*` credentials/bucket/prefix. Recovery uses deployment-relative keys, not the source bucket namespace, and verifies actual target objects rather than unused local copies. Standard recovery's default safety backup preserves prior S3 bytes/metadata and removes newly created keys on rollback. Legacy format-1 portable archives remain readable; transfer attachments always retain download-only delivery headers.
+
+Restoring a `.picpeak` puts the instance into maintenance while the database and files are replaced. It is an optional feature (Linux, the native build and local storage); where the host does not qualify everything else runs normally and only the import is switched off. A restore that fails is rolled back and the instance reopens by itself; after a committed restore, restart the backend once. See [Portable restore](docs/PORTABLE_RESTORE.md) for requirements, limits, recovery and the S3 generation index.
 ### Mail network policy
 
 Every SMTP/IMAP connection validates and consumes only its current vetted DNS

@@ -11,10 +11,14 @@ const knexConfig = require('../../knexfile');
 const logger = require('../utils/logger');
 const backupManifest = require('./backupManifest');
 const S3StorageAdapter = require('./storage/s3Storage');
+const recoveryFiles = require('./recoveryFiles');
+const { getStorage } = require('./storage');
 const { queueEmail } = require('./emailProcessor');
 const { formatBoolean } = require('../utils/dbCompat');
 const { nextSessionCutoff, invalidateSessionsIssuedSoFar } = require('../utils/sessionCutoff');
 const { assertCompleteFileRestore, resolveBackupPointLocation } = require('../utils/backupRestorePoint');
+const applicationWork = require('./activeApplicationWork');
+const portableRuntime = require('./portableRestoreRuntimeState');
 
 // A manifest is attacker-influenceable (hand-crafted backup). Reject any
 // entry path that would resolve OUTSIDE its intended base directory
@@ -341,6 +345,8 @@ class RestoreService {
     // the replay doesn't inflate the row-count check. Reset per run
     // via beforeRestore() to keep state from leaking across calls.
     this.preservedMetaSnapshot = [];
+    this.generationIndexSnapshot = null;
+    this.portableRuntimeSnapshot = null;
     this.dbType = knexConfig.client === 'pg' ? 'postgresql' : 'sqlite';
     this.tempDir = path.join(os.tmpdir(), 'picpeak-restore');
   }
@@ -360,6 +366,32 @@ class RestoreService {
    * @returns {Promise<Object>} - Restore result
    */
   async restore(options) {
+    return applicationWork.track('native-restore', () => this.coordinated(options));
+  }
+
+  // Only the trusted install-from-backup boot hook uses this entry point.
+  // It runs before readiness and before ordinary writers/background jobs.
+  async restoreDuringStartup(options) {
+    return applicationWork.track('native-startup-restore', () => this.coordinated(options));
+  }
+
+  // A native restore replaces the database, including the control rows of a
+  // portable restore. Where this runtime takes part in one (it registered),
+  // the restore holds the shared ingress slot so no registration is lost
+  // between its snapshot and replay. Everywhere else, including every host
+  // that cannot run a portable restore, it runs exactly as it always did.
+  async coordinated(options) {
+    const coordinator = require('./portableRestoreCoordinator');
+    await coordinator.admitUpload();
+    if (!coordinator.isRegistered()) return this.performRestore(options);
+    return require('./portableRestoreIngress').withIngress(async () => {
+      const result = await this.performRestore(options);
+      await coordinator.admitUpload();
+      return result;
+    });
+  }
+
+  async performRestore(options) {
     if (this.isRunning) {
       throw new Error('Restore operation already in progress');
     }
@@ -368,6 +400,8 @@ class RestoreService {
     this.restoreLog = [];
     this.preservedMetaSnapshot = [];  // reset per run
     this.preRestoreBackupPath = null;
+    this.generationIndexSnapshot = null;
+    this.portableRuntimeSnapshot = null;
     const startTime = new Date();
     let restoreRun = null;
 
@@ -468,7 +502,7 @@ class RestoreService {
       // Step 4: Create pre-restore backup (unless explicitly skipped)
       if (!options.skipPreBackup) {
         this.updateProgress('Creating pre-restore safety backup...');
-        this.preRestoreBackupPath = await this.createPreRestoreBackup(options);
+        this.preRestoreBackupPath = await this.createPreRestoreBackup(options, manifest);
         this.log('info', 'Pre-restore backup created', { path: this.preRestoreBackupPath });
       } else {
         this.log('warn', 'Pre-restore backup skipped at user request');
@@ -1039,12 +1073,11 @@ class RestoreService {
   /**
    * Create pre-restore backup
    */
-  async createPreRestoreBackup(options) {
+  async createPreRestoreBackup(options, manifest) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupName = `pre-restore-${timestamp}`;
-    const backupPath = path.join(this.tempDir, backupName);
-
-    await fs.mkdir(backupPath, { recursive: true });
+    await fs.mkdir(this.tempDir, { recursive: true, mode: 0o700 });
+    const backupPath = await fs.mkdtemp(path.join(this.tempDir, `pre-restore-${timestamp}-`));
+    await fs.chmod(backupPath, 0o700);
 
     try {
       // Backup database
@@ -1070,12 +1103,54 @@ class RestoreService {
       }
 
       // Backup files
-      if (options.restoreType === 'full' || options.restoreType === 'files') {
+      if (options.restoreType === 'full' || options.restoreType === 'files' || options.restoreType === 'selective') {
         this.log('info', 'Backing up current files...');
         const storagePath = process.env.STORAGE_PATH || path.join(__dirname, '../../../storage');
         const filesBackupPath = path.join(backupPath, 'files.tar.gz');
 
-        await spawnAsync('tar', ['-czf', filesBackupPath, '-C', path.dirname(storagePath), path.basename(storagePath)]);
+        if (options.restoreType === 'selective') {
+          // A selective restore only overwrites the files it names, so the
+          // safety copy holds those and not the whole storage tree.
+          const existing = [];
+          for (const item of options.selectedItems.filter(entry => entry.type === 'file')) {
+            const target = path.join(storagePath, item.path);
+            if (pathEscapes(storagePath, target)) continue;
+            // tar reads the list line by line, and GNU tar unquotes it.
+            if (/[\r\n\\]/.test(item.path)) {
+              this.log('warn', `Not in the safety copy (unsupported file name): ${item.path}`);
+              continue;
+            }
+            const stat = await fs.lstat(target).catch(() => null);
+            if (stat && stat.isFile()) existing.push(path.join(path.basename(storagePath), item.path));
+          }
+          if (existing.length) {
+            const listPath = path.join(backupPath, 'files.list');
+            await fs.writeFile(listPath, `${existing.join('\n')}\n`, { mode: 0o600 });
+            await spawnAsync('tar', ['-czf', filesBackupPath, '-C', path.dirname(storagePath), '-T', listPath]);
+            await fs.unlink(listPath);
+          }
+        } else {
+          await spawnAsync('tar', ['-czf', filesBackupPath, '-C', path.dirname(storagePath), path.basename(storagePath)]);
+        }
+        if (getStorage().kind() === 's3') {
+          if (!manifest) throw new Error('An S3 safety backup requires the restore catalogue');
+          const prior = [];
+          const maxBytes = await getRestoreMaxFileBytes();
+          for (const file of recoveryFiles.selectedManifestFiles(manifest, options)) {
+            const key = recoveryFiles.validKey(file.path);
+            if (!recoveryFiles.remoteDestination(key)) continue;
+            if (!(await getStorage().stat(key))) { prior.push({ path: key, existed: false }); continue; }
+            const captured = await recoveryFiles.captureAdapter(key, maxBytes);
+            try {
+              const target = path.join(backupPath, 'adapter-files', ...key.split('/'));
+              await fs.mkdir(path.dirname(target), { recursive: true });
+              await fs.copyFile(captured.path, target);
+              prior.push({ path: key, existed: true, size: captured.size,
+                checksum: captured.checksum, object_metadata: captured.objectMetadata });
+            } finally { await captured.cleanup(); }
+          }
+          await fs.writeFile(path.join(backupPath, 'adapter-files.json'), JSON.stringify(prior), { mode: 0o600 });
+        }
       }
 
       // Create backup manifest
@@ -1359,7 +1434,18 @@ class RestoreService {
 
     // Decompress if needed
     let restoreFile = dbBackupPath;
+    // Native dumps may contain a foreign runtime map, or predate its schema.
+    // Preserve the target representation across success AND rollback. Never
+    // initialize storage from the archive's physical object names.
+    const s3Index = require('./storage/generationIndex');
+    let targetIndex;
+    let targetRuntime;
+    let indexReplayed = false;
     try {
+      targetIndex = await s3Index.snapshotDatabaseIndex(db);
+      this.generationIndexSnapshot = targetIndex;
+      targetRuntime = await portableRuntime.snapshot(db);
+      this.portableRuntimeSnapshot = targetRuntime;
       if (dbBackupPath.endsWith('.gz')) {
         this.log('info', 'Decompressing database backup...');
         const decompressedPath = dbBackupPath.slice(0, -3);
@@ -1604,6 +1690,9 @@ END $$;`
       const { reinitPool } = require('../database/db');
       this.log('info', 'Re-initializing knex pool against the restored database...');
       await reinitPool();
+      await s3Index.restoreDatabaseIndex(db, targetIndex);
+      await portableRuntime.restore(db, targetRuntime);
+      indexReplayed = true;
       this.log('info', 'Knex pool re-initialized');
 
 
@@ -1641,6 +1730,15 @@ END $$;`
       return { success: true };
 
     } catch (error) {
+      if (!indexReplayed && targetIndex && targetRuntime) {
+        try {
+          await require('../database/db').reinitPool();
+          await s3Index.restoreDatabaseIndex(db, targetIndex);
+          await portableRuntime.restore(db, targetRuntime);
+        } catch (preserveError) {
+          throw new Error(`${error.message}; target S3 generation index preservation failed: ${preserveError.message}`);
+        }
+      }
       this.log('error', 'Database restore failed', { error: error.message });
       throw error;
     } finally {
@@ -1687,6 +1785,10 @@ END $$;`
         }
         const expectedChecksum = requireContentChecksum(manifest, file.checksum, file.path);
 
+        // Validates the key, so it runs before a descriptor is open: a
+        // throw here must not leave one behind.
+        const remote = recoveryFiles.remoteDestination(file.path);
+
         // Check that the source exists, is a regular file (no symlinks, no
         // devices) and really lives under the backup root — then keep the
         // open descriptor for the copy.
@@ -1705,6 +1807,22 @@ END $$;`
         // pre-restore tar rollback would leave behind.
         let stageDir = null;
         let targetBackup = null;
+        if (remote) {
+          let captured;
+          try {
+            captured = await recoveryFiles.captureStream(sourceHandle.createReadStream(), {
+              maxBytes, expectedSize: file.size, checksum: file.checksum, label: file.path,
+            });
+            const metadata = recoveryFiles.restoreObjectOptions(file.path, file.object_metadata);
+            await getStorage().putFromFile(file.path, captured.path, metadata);
+            await recoveryFiles.verifyAdapter(file.path, captured.checksum, metadata, maxBytes);
+            restoredCount++;
+            continue;
+          } finally {
+            await sourceHandle.close().catch(() => {});
+            if (captured) await captured.cleanup();
+          }
+        }
         try {
           await fs.mkdir(this.tempDir, { recursive: true });
           stageDir = await fs.mkdtemp(path.join(this.tempDir, 'verified-file-'));
@@ -1891,6 +2009,13 @@ END $$;`
             continue;
           }
           try {
+            if (recoveryFiles.remoteDestination(file.path)) {
+              const actual = await recoveryFiles.verifyAdapter(file.path, file.checksum,
+                recoveryFiles.restoreObjectOptions(file.path, file.object_metadata), await getRestoreMaxFileBytes());
+              if (file.checksum && actual !== file.checksum) verification.errors.push(`Checksum mismatch for ${file.path}`);
+              verification.checksums[file.path] = { expected: file.checksum, actual, match: !file.checksum || actual === file.checksum };
+              continue;
+            }
             await fs.access(filePath);
             
             if (file.checksum) {
@@ -1927,6 +2052,9 @@ END $$;`
     this.log('warn', 'Attempting rollback to pre-restore state...');
 
     try {
+      const s3Index = require('./storage/generationIndex');
+      const targetIndex = this.generationIndexSnapshot || await s3Index.snapshotDatabaseIndex(db);
+      const targetRuntime = this.portableRuntimeSnapshot || await portableRuntime.snapshot(db);
       // Read backup manifest
       const manifestPath = path.join(preRestoreBackupPath, 'backup-manifest.json');
       // Parsed for its side effect: throws if the manifest is missing/corrupt.
@@ -1951,12 +2079,40 @@ END $$;`
           await spawnFromFile('psql', ['-h', host, '-p', String(port), '-U', user, '-d', database], decompressedPath, { env });
         }
 
+        await require('../database/db').reinitPool();
+        await s3Index.restoreDatabaseIndex(db, targetIndex);
+        await portableRuntime.restore(db, targetRuntime);
+
         await fs.unlink(decompressedPath);
         // The identity tables changed again; see step 6b in restore().
         await invalidateSessionsIssuedSoFar();
       }
 
       // Restore files if backed up
+      const adapterIndex = path.join(preRestoreBackupPath, 'adapter-files.json');
+      if (await fs.access(adapterIndex).then(() => true).catch(error => {
+        if (error.code === 'ENOENT') return false; throw error;
+      })) {
+        if (getStorage().kind() !== 's3') throw new Error('Primary storage changed since the safety backup');
+        for (const file of JSON.parse(await fs.readFile(adapterIndex, 'utf8'))) {
+          const key = recoveryFiles.validKey(file.path);
+          if (!recoveryFiles.remoteDestination(key)) throw new Error(`Invalid S3 rollback key: ${key}`);
+          if (!file.existed) { await getStorage().delete(key); continue; }
+          const root = await fs.realpath(path.join(preRestoreBackupPath, 'adapter-files'));
+          // The capture accepted this object under the limit in force then;
+          // its recorded size keeps it restorable if the limit is lower now.
+          const maxBytes = Math.max(await getRestoreMaxFileBytes(), Number(file.size) || 0);
+          const handle = await openRestoreSource(root, key, maxBytes);
+          let captured;
+          try {
+            captured = await recoveryFiles.captureStream(handle.createReadStream(), {
+              maxBytes, expectedSize: file.size, checksum: file.checksum, label: key,
+            });
+            await getStorage().putFromFile(key, captured.path, recoveryFiles.objectOptions(file.object_metadata));
+            await recoveryFiles.verifyAdapter(key, file.checksum, file.object_metadata, maxBytes);
+          } finally { await handle.close().catch(() => {}); if (captured) await captured.cleanup(); }
+        }
+      }
       const filesBackupPath = path.join(preRestoreBackupPath, 'files.tar.gz');
       if (await fs.access(filesBackupPath).then(() => true).catch(() => false)) {
         const storagePath = process.env.STORAGE_PATH || path.join(__dirname, '../../../storage');

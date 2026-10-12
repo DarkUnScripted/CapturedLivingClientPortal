@@ -67,7 +67,7 @@ export interface PhotoCardProps {
   feedbackOptions?: PhotoCardFeedbackOptions;
   slug?: string;
   onQuickComment?: () => void;
-  onFeedbackChange?: () => void;
+  onFeedbackChange?: (toggledPhotoId?: number) => void;
   liked?: boolean;
   onLikeSuccess?: () => void;
   /** 'self': card owns the identity modal; 'parent': delegate via onRequireIdentity. */
@@ -109,7 +109,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
   lazy = false,
   inViewRootMargin,
   releaseRootMargin,
-  skeletonClassName = 'skeleton w-full h-full rounded-lg',
+  skeletonClassName = 'skeleton bg-border-token w-full h-full rounded-lg',
   fadeInWhenVisible = false,
   overlayBaseClassName,
   actionVariant = 'light',
@@ -354,7 +354,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
       } catch (err) {
         console.warn('Like submit failed, keeping optimistic UI', err);
       }
-      if (onFeedbackChange) onFeedbackChange();
+      if (onFeedbackChange) onFeedbackChange(photo.id);
       hideOverlay();
       return;
     }
@@ -384,7 +384,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
       // Keep optimistic state; a refresh will reconcile
       console.warn('Like submit failed, keeping optimistic UI', err);
     }
-    if (onFeedbackChange) onFeedbackChange();
+    if (onFeedbackChange) onFeedbackChange(photo.id);
     hideOverlay();
   };
 
@@ -408,7 +408,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
     showFeedbackActions && feedbackOptions?.allowLikes ? (
       <button
         className={`p-2 rounded-full transition-colors ${
-          liked ? 'bg-red-500/90 hover:bg-red-500' : 'bg-white/90 hover:bg-white'
+          liked ? 'bg-danger hover:opacity-90' : 'bg-white/90 hover:bg-white'
         }`}
         onClick={handleLike}
         aria-label={likeToggleLabels && liked ? 'Unlike photo' : 'Like photo'}

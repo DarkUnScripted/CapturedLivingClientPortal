@@ -1,6 +1,7 @@
 import { useGalleryFiltering, resolveMediaType } from './hooks/useGalleryFiltering';
 import { useGalleryUpload } from './hooks/useGalleryUpload';
 import { useGallerySelection } from './hooks/useGallerySelection';
+import { useFeedbackChange } from './hooks/useFeedbackChange';
 import { UploadProcessingNotice } from './UploadProcessingNotice';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { differenceInDays, parseISO } from 'date-fns';
@@ -70,7 +71,7 @@ import { DownloadQuotaNotice } from './DownloadQuotaNotice';
 import type { FilterType, FeedbackFilterType } from './GalleryFilter';
 import { analyticsService } from '../../services/analytics.service';
 import { useDevToolsProtection } from '../../hooks/useDevToolsProtection';
-import { Upload, Menu, Eye, EyeOff, Shield, X, Download, ClipboardList } from 'lucide-react';
+import { Upload, Menu, Eye, EyeOff, Shield, X, Download, ClipboardList, AlertCircle } from 'lucide-react';
 import { galleryService } from '../../services/gallery.service';
 import { feedbackService, type ColorLabel } from '../../services/feedback.service';
 import { useWatermarkSettings } from '../../hooks/useWatermarkSettings';
@@ -249,6 +250,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
   // Fetch photos WITHOUT filter (always get all photos, filter on frontend)
   // This ensures counts are always calculated from the full dataset
   const { data, isLoading, error, refetch } = useGalleryPhotos(slug, 'all', guestId);
+  const handleFeedbackChange = useFeedbackChange(slug, refetch, { patchRows: !isClient });
   const { isSelectionMode, setIsSelectionMode, selectedPhotos, setSelectedPhotos } = useGallerySelection(data?.photos);
   
   // Set protection level when data is available
@@ -1197,7 +1199,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
     return <GallerySkeleton />;
   }
 
-  if (error || !data) {
+  // Auth failures end the session whenever they happen, background refetch
+  // included. So does a gallery that is gone or closed to this guest (403,
+  // 404, 410: expired, deleted, access withdrawn): keeping its grid would only
+  // leave thumbnails that fail one by one. Any other failure replaces the
+  // gallery only when nothing has loaded yet: a failed background refetch
+  // keeps the photos on screen (TanStack keeps `data` and sets `error`), as
+  // UX.md › States asks.
+  const errorStatus = (error as { response?: { status?: number } } | null)?.response?.status;
+  const galleryGone = errorStatus === 403 || errorStatus === 404 || errorStatus === 410;
+  if (error) {
     // Check if it's an authentication error (401)
     const is401Error = (error as any)?.response?.status === 401;
 
@@ -1216,10 +1227,13 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
     if (isPasswordChangeRequired(error)) {
       return <PasswordChangeRequiredNotice />;
     }
+  }
 
+  if (!data || galleryGone) {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center">
-        <div className="text-center">
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4">
+        <div className="text-center" role="alert">
+          <AlertCircle className="w-10 h-10 mx-auto mb-3 text-muted-theme" aria-hidden="true" />
           <p className="text-lg text-muted-theme">{t('gallery.failedToLoad')}</p>
           <Button onClick={() => refetch()} className="mt-4">
             {t('gallery.tryAgain')}
@@ -1524,13 +1538,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
           people={peopleEnabled ? people : undefined}
           onSelectPerson={togglePerson}
           categoryId={selectedCategoryId}
-          onFeedbackChange={() => {
-            refetch();
-            // Guest-mode Rated/Liked filter membership + chip counts come
-            // from my-feedback, not the photo rows (#538) — refresh it too
-            // so e.g. a cleared rating (#884) leaves the Rated filter.
-            queryClient.invalidateQueries({ queryKey: ['my-feedback', slug] });
-          }}
+          onFeedbackChange={handleFeedbackChange}
           heroPhotoOverride={staticHeroPhoto}
           feedbackEnabled={feedbackEnabled}
           feedbackOptions={{
@@ -1776,14 +1784,14 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
 
         {/* Client Access Banner (#172) */}
         {isClient && (
-          <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
+          <div className="mt-4 rounded-lg status-chip hue-warning p-4">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-                <span className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                <Shield className="w-5 h-5" />
+                <span className="text-sm font-medium">
                   {t('clientAccess.banner')}
                 </span>
-                <span className="text-xs text-amber-600 dark:text-amber-400 ml-2">
+                <span className="text-xs ml-2">
                   {t('clientAccess.visibleCount', { visible: visibleCount, total: totalCount })}
                 </span>
               </div>
@@ -1895,7 +1903,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
                       key={id}
                       type="button"
                       onClick={() => togglePerson(id)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-50 text-primary-700 text-sm hover:bg-primary-100"
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent-soft text-theme text-sm hover:brightness-95"
                     >
                       {person.label || t('gallery.people.unnamedCount', {
                         count: person.face_count,
@@ -1993,13 +2001,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
             people={peopleEnabled ? people : undefined}
             onSelectPerson={togglePerson} 
             categoryId={selectedCategoryId}
-            onFeedbackChange={() => {
-              refetch();
-              // Guest-mode Rated/Liked filter membership + chip counts come
-              // from my-feedback, not the photo rows (#538) — refresh it too
-              // so e.g. a cleared rating (#884) leaves the Rated filter.
-              queryClient.invalidateQueries({ queryKey: ['my-feedback', slug] });
-            }}
+            onFeedbackChange={handleFeedbackChange}
             heroPhotoOverride={staticHeroPhoto}
             feedbackEnabled={feedbackEnabled}
             feedbackOptions={{

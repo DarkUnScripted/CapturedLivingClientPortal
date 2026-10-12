@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'react-toastify';
 import { useDevToolsProtection } from '../../hooks/useDevToolsProtection';
 import { X, ChevronLeft, ChevronRight, Download, ZoomIn, ZoomOut, Minimize2, MessageSquare, Heart, Star, Lock } from 'lucide-react';
 import type { Photo, GalleryPerson } from '../../types';
@@ -19,6 +20,7 @@ import { useGuestIdentityOptional } from '../../contexts/GuestIdentityContext';
 import { useDownloadQuota } from '../../contexts/DownloadQuotaContext';
 import { notifyDownloadQuotaChanged, showDownloadLimitReached, videoUnavailableMessage } from '../../utils/downloadLimit';
 import { useFeedbackLimitModal } from '../../hooks/useFeedbackLimitModal';
+import { lockBodyScroll } from '../../utils/scrollLock';
 
 interface PhotoLightboxProps {
   photos: Photo[];
@@ -31,7 +33,7 @@ interface PhotoLightboxProps {
   useEnhancedProtection?: boolean;
   useCanvasRendering?: boolean;
   initialShowFeedback?: boolean;
-  onFeedbackChange?: () => void;
+  onFeedbackChange?: (toggledPhotoId?: number) => void;
   disableRightClick?: boolean;
   enableDevtoolsProtection?: boolean;
   // When true, surface each photo's original camera filename in the
@@ -347,7 +349,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
     };
 
     document.addEventListener('keydown', handleKeyDown);
-    document.body.style.overflow = 'hidden';
+    const unlockScroll = lockBodyScroll();
     
     // Add protection class to body for maximum security
     if (protectionLevel === 'maximum') {
@@ -358,7 +360,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
+      unlockScroll();
       
       // Remove protection classes from body
       document.body.classList.remove('protection-maximum', 'protection-enhanced');
@@ -421,6 +423,15 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
     return () => { mounted = false; };
   }, [slug, currentPhoto?.id, currentPhoto?.my_rating, feedbackSettings?.feedback_enabled]);
 
+  // Said out loud, as the grid's like button does (PhotoLikes): a 429 was
+  // only logged, so to the guest the heart did nothing (issue 1891).
+  const showLikeError = (err: unknown) => {
+    const rateLimited = (err as { response?: { status?: number } })?.response?.status === 429;
+    toast.error(rateLimited
+      ? t('feedback.likeRateLimited', 'Too many requests. Wait a few minutes, then try again.')
+      : t('feedback.likeError', 'Failed to update like'));
+  };
+
   const submitLike = async () => {
     // Guest identity mode: ensure we have a per-person guest token. The
     // server reads name/email from the token — body values are ignored.
@@ -440,12 +451,11 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
           setLikeCount(c => Math.max(0, c + (next ? 1 : -1)));
           return next;
         });
-        if (onFeedbackChange) onFeedbackChange();
+        if (onFeedbackChange) onFeedbackChange(currentPhoto.id);
       } catch (err) {
         // Per-guest cap reached (#655) surfaces the shared modal.
         if (handleLimitError(err)) return;
-        // eslint-disable-next-line no-console
-        console.warn('Like submit failed', err);
+        showLikeError(err);
       }
       return;
     }
@@ -472,11 +482,10 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
       // filter chips) in sync — the guest-mode path above already does
       // this; without it, likes made in the lightbox don't appear in
       // the Likes filter until a full page reload.
-      if (onFeedbackChange) onFeedbackChange();
+      if (onFeedbackChange) onFeedbackChange(currentPhoto.id);
     } catch (err) {
       if (handleLimitError(err)) return;
-      // eslint-disable-next-line no-console
-      console.warn('Like submit failed', err);
+      showLikeError(err);
     }
   };
 
@@ -1120,7 +1129,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
               <div className="flex items-center gap-1">
                 <button
                   onClick={submitLike}
-                  className={`p-2 rounded-full transition-colors ${myLiked ? 'bg-red-500/80 hover:bg-red-500' : 'bg-white/10 hover:bg-white/20'}`}
+                  className={`p-2 rounded-full transition-colors ${myLiked ? 'bg-danger hover:opacity-90' : 'bg-white/10 hover:bg-white/20'}`}
                   aria-label={myLiked ? 'Unlike photo' : 'Like photo'}
                   title={myLiked ? 'Unlike' : 'Like'}
                 >
@@ -1153,7 +1162,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
                     aria-label={i === myRating ? 'Remove rating' : `Rate ${i} star${i>1?'s':''}`}
                     title={i === myRating ? 'Remove rating' : `Rate ${i}`}
                   >
-                    <Star className={`w-5 h-5 ${myRating >= i ? 'text-yellow-400 fill-yellow-400' : 'text-white/70'}`} />
+                    <Star className={`w-5 h-5 ${myRating >= i ? 'text-rating fill-rating' : 'text-white/70'}`} />
                   </button>
                 ))}
                 {/* The average is other guests' ratings: shown only when the
@@ -1219,7 +1228,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
               >
                 <MessageSquare className="w-5 h-5 text-white" />
                 {((currentPhoto.comment_count ?? 0) > 0 || (currentPhoto.average_rating ?? 0) > 0) && (
-                  <span className="absolute -top-1 -right-1 bg-accent-dark/150 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 bg-accent-dark text-accent-fg text-xs rounded-full w-5 h-5 flex items-center justify-center">
                     {(currentPhoto.comment_count ?? 0) > 0 ? currentPhoto.comment_count ?? 0 : '★'}
                   </span>
                 )}
@@ -1423,13 +1432,14 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
 
       {/* Feedback Panel */}
       {showFeedback && (
-        <div className="absolute right-0 top-0 bottom-0 w-full sm:w-[26rem] bg-surface shadow-xl z-20 overflow-y-auto flex flex-col border-l border-surface">
-          <div className="sticky top-0 bg-surface border-b border-surface px-4 py-3 flex items-center justify-between">
-            <h3 className="font-semibold" style={{ color: 'var(--color-text)' }}>Photo Feedback</h3>
+        <div className="absolute right-0 top-0 bottom-0 w-full sm:w-[26rem] bg-surface text-theme shadow-xl z-20 overflow-y-auto flex flex-col border-l border-border-token">
+          <div className="sticky top-0 bg-surface border-b border-border-token px-4 py-3 flex items-center justify-between">
+            <h3 className="font-semibold text-theme">{t('feedback.panelTitle', 'Photo feedback')}</h3>
             <button
+              type="button"
               onClick={() => setShowFeedback(false)}
-              className="p-1 hover:bg-black/10 rounded transition-colors"
-              aria-label="Close feedback"
+              className="p-1 hover-surface rounded transition-colors"
+              aria-label={t('feedback.closePanel', 'Close feedback')}
             >
               <X className="w-5 h-5" />
             </button>
@@ -1440,9 +1450,9 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
               gallerySlug={slug}
               showComments={true}
               className="space-y-4"
-              onFeedbackUpdate={() => {
-                if (onFeedbackChange) onFeedbackChange();
-              }}
+              // Only when someone above refreshes the row; otherwise the
+              // panel's buttons invalidate the list themselves.
+              onFeedbackUpdate={onFeedbackChange ? (toggledPhotoId) => onFeedbackChange(toggledPhotoId) : undefined}
             />
           </div>
         </div>
@@ -1465,7 +1475,9 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
               setMyLiked(true);
             } catch (err) {
               // Per-guest cap reached (#655) on the post-identity-modal submit.
-              if (!handleLimitError(err)) throw err;
+              // Anything else is said out loud too: rethrown from here it was
+              // a rejection nobody handled, so the heart again did nothing.
+              if (!handleLimitError(err)) showLikeError(err);
             }
           } else if (pendingAction?.type === 'rating' && typeof pendingAction.rating === 'number') {
             // Explicit number check above: a pending rating of 0 (= clear
@@ -1500,7 +1512,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
           }
           // Sync gallery photo list (feedback filter chips) — parity with
           // the direct submit paths.
-          if (onFeedbackChange) onFeedbackChange();
+          if (onFeedbackChange) onFeedbackChange(pendingAction?.type === 'like' ? currentPhoto.id : undefined);
           setPendingAction(null);
         }}
         feedbackType={

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../utils/logger');
+const applicationWork = require('./activeApplicationWork');
 const { AppError } = require('../utils/errors');
 const { formatBoolean } = require('../utils/dbCompat');
 const { parseExpiresAtText } = require('../utils/expiresAtText');
@@ -19,6 +20,7 @@ const { clampIntOrUndefined } = require('../utils/numericHelpers');
 const { getFrontendBaseUrl } = require('../utils/frontendUrl');
 const {
   notifyGalleryRecipients, resolveGalleryRecipients, reachableAccountsByIds, hasPasswordGeneratedColumn,
+  galleryLinkFor,
 } = require('./galleryNotificationService');
 const { resolveEventFeedbackDefaults, applyFeedbackDefaults } = require('./feedbackDefaults');
 const { getStoragePath, getEventFieldRequirements, readBooleanSetting, getDownloadProtectionDefaults,
@@ -655,6 +657,7 @@ async function createEvent(data, { actor, source = 'admin', frontendUrl } = {}) 
     try {
       const announced = {
         id: eventId,
+        slug,
         customer_email: customerEmail,
         host_email: customerEmail,
         welcome_message,
@@ -684,7 +687,8 @@ async function createEvent(data, { actor, source = 'admin', frontendUrl } = {}) 
         await queueWhatsapp(eventId, customerPhone, 'gallery_created', {
           customer_name: customerName || '',
           event_name,
-          gallery_link: shareUrl,
+          // A CRM customer gets their portal link here too (galleryLinkFor).
+          gallery_link: await galleryLinkFor({ id: eventId, slug }, customerEmail, shareUrl),
           gallery_password: requirePassword ? password : '',
           expiry_date: expires_at ? expires_at.toISOString() : null,
           language: null, // resolved by processor via general_default_language
@@ -792,8 +796,8 @@ async function resolveCreationSource({ source_mode, external_path, external_watc
  * endpoint; a failure is logged and the admin can press Rescan.
  */
 function startInitialImport(eventId, externalPath, actor) {
-  setImmediate(() => {
-    importExternalFolder({
+  applicationWork.defer('initial external import', () => {
+    return importExternalFolder({
       eventId,
       externalPath,
       recursive: true,

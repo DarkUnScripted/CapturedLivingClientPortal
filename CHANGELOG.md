@@ -5,6 +5,64 @@ All notable changes to PicPeak will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.169.0-beta.0](https://github.com/PicPeak/picpeak/compare/v3.168.3-beta.0...v3.169.0-beta.0) (2026-10-12)
+
+
+### Features
+
+* **analytics:** let the operator decide whether Do Not Track visitors are counted ([#1927](https://github.com/PicPeak/picpeak/issues/1927)) ([355ae7e](https://github.com/PicPeak/picpeak/commit/355ae7ea8c305388938813fe5069bbcb109dd794))
+* **transfers:** configurable files-per-upload limit, global default and per-request override ([#1929](https://github.com/PicPeak/picpeak/issues/1929)) ([e2e1383](https://github.com/PicPeak/picpeak/commit/e2e1383b07fb65308ec39ea8ce6610a1566385d6))
+* **transfers:** download everything a client sent through a file request as one ZIP ([#1928](https://github.com/PicPeak/picpeak/issues/1928)) ([a1d5596](https://github.com/PicPeak/picpeak/commit/a1d55966f3626f4158a443c83678982a89c08750))
+
+
+### Bug Fixes
+
+* **analytics:** say in the settings that opted-out browsers are not counted ([#1919](https://github.com/PicPeak/picpeak/issues/1919)) ([90d5c05](https://github.com/PicPeak/picpeak/commit/90d5c056841e514cb26656dbee1d1360503f9d1e))
+* **gallery:** give a verified viewer a request budget of their own, and say when a like is refused ([#1925](https://github.com/PicPeak/picpeak/issues/1925)) ([d9f49d4](https://github.com/PicPeak/picpeak/commit/d9f49d46e1356428df5d4b90242c970c2fe75892))
+* **gallery:** refresh only the liked photo instead of refetching the whole gallery ([#1917](https://github.com/PicPeak/picpeak/issues/1917)) ([477f1d3](https://github.com/PicPeak/picpeak/commit/477f1d35066f513108b879c9be506e9c7e12bcbe))
+* **seo:** app pages answer noindex so only the landing page can be indexed ([#1922](https://github.com/PicPeak/picpeak/issues/1922)) ([676aa3c](https://github.com/PicPeak/picpeak/commit/676aa3c030ef806f0bc7601f402922dca4e0fc97))
+
+## [3.168.3-beta.0](https://github.com/PicPeak/picpeak/compare/v3.168.2-beta.0...v3.168.3-beta.0) (2026-10-11)
+
+
+### Bug Fixes
+
+* **delivery:** CRM customers get their portal link, never the direct gallery link ([#1916](https://github.com/PicPeak/picpeak/issues/1916)) ([4fbff3c](https://github.com/PicPeak/picpeak/commit/4fbff3c460086e6cbc292bbb3305e0bc66e98b61))
+
+## [3.168.2-beta.0](https://github.com/PicPeak/picpeak/compare/v3.168.1-beta.0...v3.168.2-beta.0) (2026-10-11)
+
+
+### Bug Fixes
+
+* **bills:** invoice edits save VAT code and linked gallery; galleries link on the CRM owner rule ([#1909](https://github.com/PicPeak/picpeak/issues/1909)) ([756ed95](https://github.com/PicPeak/picpeak/commit/756ed957b6a51387f845c68044070cf2c0b0e231))
+
+## [3.168.1-beta.0](https://github.com/PicPeak/picpeak/compare/v3.168.0-beta.0...v3.168.1-beta.0) (2026-10-11)
+
+
+### Bug Fixes
+
+* **restore:** bound portable imports and coordinate maintenance recovery ([#1894](https://github.com/PicPeak/picpeak/issues/1894)) ([d4c97ad](https://github.com/PicPeak/picpeak/commit/d4c97ad067039273846aa60b3068dcbdc3712316))
+
+## [3.168.0-beta.0](https://github.com/PicPeak/picpeak/compare/v3.167.6-beta.0...v3.168.0-beta.0) (2026-10-10)
+
+
+### Features
+
+* **styling:** UI overhaul — one colour source, building blocks across the admin, themed portal and gallery ([#1896](https://github.com/PicPeak/picpeak/issues/1896)) ([7400395](https://github.com/PicPeak/picpeak/commit/7400395e0fae0fd8b26ed4f6fd1a55c48370bda1))
+
+
+### Documentation
+
+* **readme:** quick start uses prebuilt images, all-in-one example on :stable ([#1904](https://github.com/PicPeak/picpeak/issues/1904)) ([25a8d75](https://github.com/PicPeak/picpeak/commit/25a8d7518710b077289be9896861ae25628bd452))
+
+## [3.167.6-beta.0](https://github.com/PicPeak/picpeak/compare/v3.167.5-beta.0...v3.167.6-beta.0) (2026-10-10)
+
+
+### Bug Fixes
+
+* **backup:** recover files through the active storage adapter ([#1866](https://github.com/PicPeak/picpeak/issues/1866)) ([4b5f3f7](https://github.com/PicPeak/picpeak/commit/4b5f3f7c675751a395e6eef305b54ef04a60f959))
+* **upload:** keep uploads working on nearly full and inode-less volumes ([#1905](https://github.com/PicPeak/picpeak/issues/1905)) ([10c8801](https://github.com/PicPeak/picpeak/commit/10c88015a4a8a9ccc3f8e02d0642111530eab904))
+
 ## [3.167.5-beta.0](https://github.com/PicPeak/picpeak/compare/v3.167.4-beta.0...v3.167.5-beta.0) (2026-10-08)
 
 

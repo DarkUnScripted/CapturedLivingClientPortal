@@ -20,6 +20,14 @@
 # read:packages.
 
 services:
+  # Our VPS was first installed from source with docker-compose.yml, which
+  # keeps the database in a `pgdata` subfolder of the volume. The production
+  # file uses the volume root, where Postgres then finds that folder instead of
+  # a database and refuses to start. Point it at the existing data.
+  postgres:
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+
   backend:
     image: ghcr.io/darkunscripted/capturedlivingclientportal/backend:${CL_IMAGE_TAG:-main}
 

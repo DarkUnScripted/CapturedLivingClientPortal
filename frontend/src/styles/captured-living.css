@@ -1,18 +1,26 @@
 /*
- * Captured Living gallery skin (fork-only file).
+ * Captured Living skin (fork-only file).
  *
- * Restyles the public gallery to the Captured Living design: charcoal top bar
- * with the logo, a charcoal address panel on the hero photo, 3:2 photo tiles
- * with near-square corners and a charcoal footer. Colours, fonts and layout
- * choices that PicPeak exposes in Branding stay there; this file only covers
- * what Branding cannot express.
+ * Restyles the client-facing pages to the Captured Living design:
+ *   - .gallery-page    the public gallery: charcoal top bar with the logo, a
+ *                      charcoal address panel on a full-bleed hero photo, 3:2
+ *                      photo tiles and a charcoal footer
+ *   - .cl-access-page  the gallery password page and the customer login:
+ *                      charcoal page, light form card, gold primary button
+ *   - .cl-portal       the customer portal: charcoal sidebar, plus the
+ *                      welcome / latest-delivery intro (.cl-dash-*) from
+ *                      captured-living/DashboardIntro.tsx
  *
- * Everything is scoped to .gallery-page so the admin and the customer portal
- * are untouched. The hooks it targets (gallery-hero-*, cl-bar-logo) are the
- * small additions in HeroHeader.tsx and GalleryLayout.tsx.
+ * Colours, fonts and layout choices that PicPeak exposes in Branding stay
+ * there; this file only covers what Branding cannot express. Each section is
+ * scoped to its page's root class, so the admin is untouched. The hook classes
+ * it targets are small additions to PicPeak's components (HeroHeader,
+ * GalleryLayout, GalleryPage, CustomerLayout, CustomerLoginPage).
  */
 
-.gallery-page {
+.gallery-page,
+.cl-access-page,
+.cl-portal {
   --cl-charcoal: #272D33;
   --cl-charcoal-deep: #1E2328;
   --cl-charcoal-line: #4A535C;
@@ -201,4 +209,199 @@
 
 .gallery-page .gallery-footer svg {
   color: var(--cl-greige);
+}
+
+/* ---- Access pages: gallery password, customer login ------------------------ */
+
+/* The page turns charcoal, so the theme's text tokens flip to light here and
+   flip back inside the form card, which keeps PicPeak's own form styling. */
+.cl-access-page {
+  background-color: var(--cl-charcoal) !important;
+  --color-text: var(--cl-paper);
+  --color-muted-text: var(--cl-greige);
+  --color-accent-dark: var(--cl-paper);
+  color: var(--cl-greige);
+}
+
+.cl-access-page .cl-access-title {
+  color: var(--cl-paper) !important;
+  font-family: var(--heading-font-family, Georgia, serif);
+  font-weight: 400;
+}
+
+.cl-access-page a {
+  color: var(--cl-gold);
+}
+
+.cl-access-page .card,
+.cl-access-page .card-themed {
+  --color-text: var(--cl-charcoal);
+  --color-muted-text: #5B6168;
+  --color-accent-dark: var(--cl-charcoal);
+  color: var(--cl-charcoal);
+  background-color: #FBF9F5;
+  border-color: #FBF9F5;
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+.cl-access-page .card a,
+.cl-access-page .card-themed a {
+  color: #8A5E0F;
+}
+
+.cl-access-page .btn-primary {
+  background-color: var(--cl-gold);
+  color: var(--cl-charcoal);
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.cl-access-page .btn-primary:hover {
+  background-color: var(--cl-gold-hover);
+}
+
+/* ---- Customer portal -------------------------------------------------------- */
+
+.cl-portal .cl-portal-sidebar,
+.cl-portal .cl-portal-topbar {
+  background-color: var(--cl-charcoal);
+  border-color: var(--cl-charcoal);
+  --color-text: var(--cl-paper-soft);
+  --color-muted-text: #9EA3A8;
+}
+
+.cl-portal .cl-portal-brand,
+.cl-portal .cl-portal-sidebar-footer {
+  border-color: #3A424A;
+}
+
+.cl-portal .cl-portal-brand img {
+  height: 2.5rem;
+}
+
+.cl-portal .cl-portal-sidebar .cl-portal-nav-link {
+  color: var(--cl-greige);
+  border-radius: 4px;
+}
+
+.cl-portal .cl-portal-sidebar .cl-portal-nav-link:hover {
+  background-color: #353D45;
+  color: var(--cl-paper);
+}
+
+.cl-portal .cl-portal-sidebar .cl-portal-nav-link.is-active {
+  background-color: #353D45;
+  color: var(--cl-paper);
+}
+
+.cl-portal .cl-portal-sidebar .cl-portal-nav-link.is-active svg {
+  color: var(--cl-gold);
+}
+
+.cl-portal .cl-portal-sidebar button:hover {
+  background-color: #353D45;
+}
+
+/* Dashboard intro (captured-living/DashboardIntro.tsx) */
+.cl-dash-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.cl-dash-welcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.cl-dash-title {
+  margin: 0;
+  font-family: var(--heading-font-family, Georgia, serif);
+  font-weight: 400;
+  font-size: clamp(1.75rem, 3.5vw, 2.6rem);
+  line-height: 1.1;
+  color: var(--color-text);
+}
+
+.cl-dash-subtitle {
+  margin: 0.375rem 0 0;
+  color: var(--color-muted-text);
+}
+
+.cl-dash-cta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 1.5rem;
+  background-color: var(--cl-charcoal);
+  color: var(--cl-paper);
+  border-radius: 4px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.cl-dash-cta:hover {
+  background-color: var(--cl-charcoal-deep);
+}
+
+.cl-dash-latest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+  padding: 1.5rem 1.75rem;
+  background-color: var(--cl-charcoal);
+  color: var(--cl-greige);
+}
+
+.cl-dash-eyebrow {
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cl-gold);
+}
+
+.cl-dash-latest-title {
+  margin: 0.375rem 0 0;
+  font-family: var(--heading-font-family, Georgia, serif);
+  font-weight: 400;
+  font-size: 1.6rem;
+  color: var(--cl-paper);
+}
+
+.cl-dash-latest-meta {
+  margin-top: 0.25rem;
+  font-size: 0.95rem;
+}
+
+.cl-dash-latest-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0 1.25rem;
+  background-color: var(--cl-gold);
+  color: var(--cl-charcoal);
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.cl-dash-latest-open:hover {
+  background-color: var(--cl-gold-hover);
+}
+
+.cl-dash-latest-open:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* PicPeak's portal cards: near-square corners like the rest of the design. */
+.cl-portal #customer-main .rounded-xl {
+  border-radius: 4px;
 }

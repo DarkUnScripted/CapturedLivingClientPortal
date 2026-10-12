@@ -80,6 +80,7 @@ import { usePublicSettings } from '../../hooks/usePublicSettings';
 import type { Photo } from '../../types';
 import { GALLERY_THEME_PRESETS } from '../../types/theme.types';
 import { useQueryClient } from '@tanstack/react-query';
+import { BelowHero } from '../../captured-living/BelowHero';
 
 interface GalleryViewProps {
   slug: string;
@@ -1824,6 +1825,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
             (avoids the empty "Search photos by filename" row in the screenshot
             from discussion #317). */}
         {filterBarShown ? (
+          <BelowHero slot="filters" enabled={isHeroHeader}>
           <div className="mt-6">
             <PhotoFilterBar
               // Folders are navigation, not a filter (#1160) — they get tiles.
@@ -1867,6 +1869,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
             />
           )}
         </div>
+          </BelowHero>
       ) : null}
 
         {/* People in this gallery (#1074). Sits between the filter bar and
@@ -1983,7 +1986,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
               <DownloadQuotaNotice />
             </div>
           )}
-          {folderNav}
+          <BelowHero slot="nav" enabled={isHeroHeader}>{folderNav}</BelowHero>
           {/* A gallery whose photos ALL live in folders has an empty root grid,
               and PhotoGridWithLayouts unconditionally renders "no photos found"
               — directly under the tiles that prove otherwise. Skip the grid when

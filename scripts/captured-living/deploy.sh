@@ -18,6 +18,14 @@
 
 set -euo pipefail
 
+# The script arrives on stdin (`bash -s`), and bash reads it line by line while
+# running it. Wrapping everything in main() makes bash read the whole file
+# before the first command runs, and detaching stdin keeps commands such as
+# `docker compose exec` from swallowing the rest of the script (which once made
+# a deploy stop silently after the backup and still report success).
+main() {
+exec </dev/null
+
 TAG="${1:?usage: deploy.sh <image-tag> <project-dir>}"
 DIR="${2:?usage: deploy.sh <image-tag> <project-dir>}"
 HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-300}"
@@ -98,23 +106,31 @@ set_tag "$TAG"
 echo "==> Pulling images"
 docker compose pull backend frontend
 echo "==> Starting"
-docker compose up -d
-
-if wait_healthy; then
+# `up` itself fails when a dependency (postgres) never gets healthy, so it
+# must not abort the script under `set -e` before the rollback below.
+if docker compose up -d && wait_healthy; then
     docker image prune -f >/dev/null || true
     echo "==> Deployed $TAG"
     exit 0
 fi
 
-echo "==> Rolling back to ${previous:-nothing}" >&2
-docker compose logs --tail 80 backend >&2 || true
+echo "==> Rolling back to the setup from before this deploy" >&2
+docker compose ps -a >&2 || true
+docker compose logs --tail 40 postgres backend >&2 || true
+# Restore .env (in place, keeping its owner and mode) and the compose files
+# exactly as they were, which also covers a first deploy whose previous setup
+# was not ours at all.
+cat "$backup_dir/env" > .env
 for name in docker-compose.production.yml docker-compose.captured-living.yml; do
     [[ -f "$backup_dir/$name" ]] && cp "$backup_dir/$name" "$name"
 done
-if [[ -n "$previous" ]]; then
-    set_tag "$previous"
-    docker compose up -d
-    wait_healthy && echo "Previous build $previous is running again." >&2
+if docker compose up -d && wait_healthy; then
+    echo "The previous setup (${previous:-from before}) is running again." >&2
+else
+    echo "The previous setup did not come back healthy either; needs a person." >&2
 fi
 echo "If the new build changed the database, restore $DIR/$backup_dir/database.dump (docs/CAPTURED_LIVING_SETUP.md, Rolling back)." >&2
 exit 1
+}
+
+main "$@"

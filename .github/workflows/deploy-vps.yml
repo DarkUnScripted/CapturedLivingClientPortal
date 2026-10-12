@@ -108,7 +108,13 @@ jobs:
             ssh "${ssh_opts[@]}" "$USER@$HOST" "cat > $remote_dir/.incoming/$f" < "$f"
           done
           ssh "${ssh_opts[@]}" "$USER@$HOST" "bash -s -- $(printf '%q ' "$TAG" "$DIR")" \
-            < scripts/captured-living/deploy.sh
+            < scripts/captured-living/deploy.sh | tee deploy.log
+          # A deploy that stops early can still exit 0; only the script's last
+          # line proves it got all the way through.
+          if ! grep -q "^==> Deployed $TAG\$" deploy.log; then
+            echo "::error::The server never confirmed the deploy; see the log above."
+            exit 1
+          fi
 
       - name: Remove the key
         if: always()

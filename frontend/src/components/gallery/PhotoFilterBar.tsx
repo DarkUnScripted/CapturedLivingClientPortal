@@ -91,7 +91,7 @@ export const PhotoFilterBar: React.FC<PhotoFilterBarProps> = ({
   return (
     <div className="space-y-4">
       {/* Search and Sort */}
-      <div className="flex flex-col md:flex-row gap-3 md:gap-4">
+      <div className="photo-filter-search-row flex flex-col md:flex-row gap-3 md:gap-4">
         {/* Search Bar */}
         <div className="flex-1">
           <Input
@@ -231,7 +231,7 @@ export const PhotoFilterBar: React.FC<PhotoFilterBarProps> = ({
           <div className="flex items-start lg:items-center justify-between flex-col lg:flex-row lg:flex-wrap gap-3">
             {/* Categories: keep in a horizontal scroll container */}
             {categories && categories.length > 0 && (
-              <div className="w-full overflow-x-auto pb-2 lg:pb-0">
+              <div className="photo-filter-categories w-full overflow-x-auto pb-2 lg:pb-0">
                 <div className="flex items-center gap-2 min-w-max">
                   <Button
                     variant={selectedCategoryId === null ? 'primary' : 'outline'}

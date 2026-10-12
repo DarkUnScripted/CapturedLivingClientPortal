@@ -67,7 +67,7 @@ export const GalleryFolderTiles: React.FC<GalleryFolderTilesProps> = ({
   }
 
   return (
-    <div className="mb-8">
+    <div className="gallery-folder-tiles mb-8">
       {/* Theme tokens, not Tailwind `dark:` — the gallery is themed through CSS
           variables per event, so a hardcoded light card renders white on a dark
           gallery (the #1106 class of bug). */}
@@ -81,7 +81,7 @@ export const GalleryFolderTiles: React.FC<GalleryFolderTilesProps> = ({
             type="button"
             onClick={() => onOpen(folderKey(category))}
             aria-label={t('gallery.openFolder', 'Open folder {{name}}', { name: category.name })}
-            className="group text-left rounded-lg overflow-hidden border border-border-token bg-surface hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-accent"
+            className="gallery-folder-tile group text-left rounded-lg overflow-hidden border border-border-token bg-surface hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-accent"
           >
             <div className="aspect-[4/3] relative" style={{ backgroundColor: 'var(--color-background)' }}>
               {coverPhoto?.thumbnail_url ? (

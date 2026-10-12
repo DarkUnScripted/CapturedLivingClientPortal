@@ -12,6 +12,7 @@ import {
 } from '../../utils/downloadLimit';
 import { DownloadQuotaNotice } from './DownloadQuotaNotice';
 import { useGalleryDialog } from './hooks/useGalleryDialog';
+import { describeChoice, orderChoices, recommendedChoiceId } from '../../captured-living/downloadChoices';
 
 /**
  * Resolution picker for gallery downloads (#858).
@@ -59,7 +60,8 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
   const downloadQuota = useDownloadQuota();
   const overQuota = !!quotaPhotos && !downloadQuota.allows(quotaPhotos);
   const [phase, setPhase] = useState<Phase>('choose');
-  const [selected, setSelected] = useState<string>(choices[0]?.id ?? 'original');
+  // Captured Living: preselect the recommended (web/MLS) size, not Original.
+  const [selected, setSelected] = useState<string>(recommendedChoiceId(choices) ?? 'original');
   const [error, setError] = useState<string | null>(null);
   const [photoCount, setPhotoCount] = useState(0);
   const tokenRef = useRef<string | null>(null);
@@ -169,7 +171,7 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
         role="dialog"
         aria-modal="true"
         aria-label={t('gallery.chooseResolution', 'Choose a download size')}
-        className="card-themed text-theme p-6 max-w-md w-full"
+        className="gallery-download-modal card-themed text-theme p-6 max-w-md w-full"
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 mb-4">
@@ -189,10 +191,12 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
         {phase === 'choose' && (
           <>
             <div className="space-y-2 mb-5">
-              {choices.map((choice) => (
+              {orderChoices(choices).map((choice) => {
+                const text = describeChoice(choice, choices, t);
+                return (
                 <label
                   key={choice.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                  className={`gallery-download-choice ${selected === choice.id ? 'is-selected' : ''} flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
                     selected === choice.id
                       ? 'border-accent bg-accent-soft'
                       : 'border-border-token hover-surface'
@@ -207,20 +211,21 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
                     className="accent-accent"
                   />
                   <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-medium text-theme">
-                      {choice.label}
+                    <span className="flex items-center gap-2 text-sm font-medium text-theme">
+                      {text.label}
+                      {text.recommended && (
+                        <span className="gallery-download-badge">
+                          {t('capturedLiving.download.recommended', { defaultValue: 'Recommended' })}
+                        </span>
+                      )}
                     </span>
-                    {choice.width && choice.height && (
-                      <span className="block text-xs text-muted-theme">
-                        {t('gallery.resolutionUpTo', 'up to {{width}} × {{height}} px', {
-                          width: choice.width,
-                          height: choice.height,
-                        })}
-                      </span>
+                    {text.hint && (
+                      <span className="block text-xs text-muted-theme">{text.hint}</span>
                     )}
                   </span>
                 </label>
-              ))}
+                );
+              })}
             </div>
             {quotaPhotos && downloadQuota.limited && (
               <DownloadQuotaNotice photos={quotaPhotos} className="mb-4" />

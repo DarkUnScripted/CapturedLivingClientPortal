@@ -219,7 +219,7 @@ add yourself.
    Also take a snapshot in your VPS provider's control panel if it offers one.
 2. 🌐 Actions → **Deploy to VPS** → **Run workflow** → tag `main` → **Run**.
 3. Watch the run. It backs up the database, installs the compose files, pulls
-   your images, restarts, and waits up to 5 minutes for the backend to be healthy.
+   your images, restarts, and waits up to 10 minutes for the backend to be healthy.
 4. Open your portal: log in to the admin, open a gallery, open the client portal.
 
 When it all works, turn on automatic deploys: Settings → Secrets and variables →
@@ -254,3 +254,29 @@ Actions → **Variables** → New repository variable `AUTO_DEPLOY` = `true`.
 
 The last 10 pre-deploy backups are kept in `PROJECT_DIR/backups/pre-deploy/`.
 They hold the database and `.env`, not photos, so keep your regular backups too.
+
+---
+
+## Troubleshooting
+
+Found during our own first deploy (October 2026), when the VPS moved from a
+source install (`git clone` + `docker-compose.yml`, 3.114) to our images:
+
+- **`container picpeak-postgres is unhealthy`.** A source install keeps the
+  database in a `pgdata` subfolder of its volume; the production file expects
+  the volume root. `docker-compose.captured-living.yml` sets `PGDATA` to the
+  subfolder, so this is handled. Check with
+  `ls /var/lib/docker/volumes/picpeak_postgres-data/_data` (shows only `pgdata`).
+- **Backend restarts in a loop right after "All migrations completed
+  successfully", with no error.** In production the backend logs only to files
+  and exits before writing a startup error. Show it on screen with:
+  ```bash
+  cd PROJECT_DIR && timeout 120 docker compose run --rm --no-deps -e LOG_TO_CONSOLE=true backend 2>&1 | tail -40
+  ```
+- **`JWT_SECRET must contain at least 32 characters`.** Newer PicPeak refuses
+  short keys. Replace it with `openssl rand -hex 32`, and keep the old value as
+  `GALLERY_PASSWORD_ENCRYPTION_KEY` so stored gallery passwords stay readable.
+  Everyone has to log in again.
+- **Port 3001 no longer answers from the internet.** Intended: the production
+  file binds the backend to the server itself. The website reaches it through
+  the frontend on port 3000.

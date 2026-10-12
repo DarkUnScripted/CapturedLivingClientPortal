@@ -101,7 +101,7 @@ jobs:
           PORT: ${{ vars.VPS_SSH_PORT || '22' }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          ssh_opts=(-i ~/.ssh/deploy_key -p "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          ssh_opts=(-i ~/.ssh/deploy_key -p "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
           remote_dir=$(printf '%q' "$DIR")
           ssh "${ssh_opts[@]}" "$USER@$HOST" "mkdir -p $remote_dir/.incoming"
           for f in docker-compose.production.yml docker-compose.captured-living.yml; do

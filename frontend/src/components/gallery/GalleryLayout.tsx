@@ -587,6 +587,18 @@ export const GalleryLayout: React.FC<GalleryLayoutProps> = ({
               {/* Left side - Menu button */}
               <div className="flex items-center gap-3">
                 {menuButton}
+                {/* Captured Living: logo in the hero bar, which our theme
+                    (styles/captured-living.css) paints charcoal, so the
+                    dark-background variant is the readable one. */}
+                {shouldShowLogo('header') && (brandingSettings?.logo_url_dark || brandLogoUrl) && (
+                  <div className="gallery-logo-wrapper cl-bar-logo flex-shrink-0 flex items-center">
+                    <img
+                      src={buildResourceUrl((brandingSettings?.logo_url_dark || brandLogoUrl) as string)}
+                      alt={brandingSettings?.company_name || 'Logo'}
+                      className="gallery-logo h-9 w-auto object-contain"
+                    />
+                  </div>
+                )}
                 {headerExtra}
               </div>
 

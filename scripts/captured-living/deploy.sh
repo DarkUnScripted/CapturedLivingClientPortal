@@ -28,7 +28,7 @@ exec </dev/null
 
 TAG="${1:?usage: deploy.sh <image-tag> <project-dir>}"
 DIR="${2:?usage: deploy.sh <image-tag> <project-dir>}"
-HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-300}"
+HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-600}"
 
 if [[ ! "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "Refusing image tag '$TAG'" >&2
@@ -66,6 +66,9 @@ wait_healthy() {
     while (( waited < HEALTH_WAIT_SECONDS )); do
         status=$(backend_health)
         [[ "$status" == healthy ]] && return 0
+        # A line every round keeps the SSH session from looking idle (a quiet
+        # wait once got the connection dropped mid-deploy) and shows progress.
+        echo "    backend: $status (${waited}s)"
         sleep 10
         waited=$(( waited + 10 ))
     done

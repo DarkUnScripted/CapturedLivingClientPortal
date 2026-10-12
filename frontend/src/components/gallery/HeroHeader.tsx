@@ -137,9 +137,9 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
   if (!heroPhoto) return null;
 
   return (
-    <div className="relative -mt-6">
+    <div className="gallery-hero-header relative -mt-6">
       {/* Hero Section */}
-      <div className="relative h-[60vh] sm:h-[70vh] lg:h-[80vh] max-h-[700px] -mx-4 sm:-mx-6 lg:-mx-8 mb-8">
+      <div className="gallery-hero-frame relative h-[60vh] sm:h-[70vh] lg:h-[80vh] max-h-[700px] -mx-4 sm:-mx-6 lg:-mx-8 mb-8">
         <AuthenticatedImage
           src={heroPhoto.hero_url || heroPhoto.url}
           fallbackSrc={heroPhoto.url}
@@ -156,13 +156,13 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
 
         {/* Overlay */}
         <div
-          className="absolute inset-0 bg-black"
+          className="gallery-hero-overlay absolute inset-0 bg-black"
           style={{ opacity: overlayOpacity }}
         />
 
         {/* Hero Content */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center px-4">
+        <div className="gallery-hero-content absolute inset-0 flex items-center justify-center">
+          <div className="gallery-hero-panel text-center px-4">
             {/* Logo at top position */}
             {heroLogoVisible && heroLogoPosition === 'top' && (
               <div className="mb-6">
@@ -172,7 +172,7 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
                     '/picpeak-logo-transparent.png'
                   }
                   alt="Event logo"
-                  className={`${getLogoSizeClasses(heroLogoSize)} mx-auto`}
+                  className={`gallery-hero-logo ${getLogoSizeClasses(heroLogoSize)} mx-auto`}
                   style={{
                     filter: eventLogo
                       ? 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5))'
@@ -184,7 +184,7 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
 
             {/* Event Title */}
             {eventName && (
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl xl:text-6xl font-bold text-white drop-shadow-lg mb-4">
+              <h1 className="gallery-hero-title text-3xl sm:text-4xl lg:text-5xl xl:text-6xl font-bold text-white drop-shadow-lg mb-4">
                 {eventName}
               </h1>
             )}
@@ -198,7 +198,7 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
                     '/picpeak-logo-transparent.png'
                   }
                   alt="Event logo"
-                  className={`${getLogoSizeClasses(heroLogoSize)} mx-auto`}
+                  className={`gallery-hero-logo ${getLogoSizeClasses(heroLogoSize)} mx-auto`}
                   style={{
                     filter: eventLogo
                       ? 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5))'
@@ -210,7 +210,7 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
 
             {/* Event Dates */}
             {(eventDate || expiresAt) && (
-              <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-white/90">
+              <div className="gallery-hero-meta flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-white/90">
                 {eventDate && (
                   <span className="flex items-center text-lg sm:text-xl">
                     <Calendar className="w-5 h-5 sm:w-6 sm:h-6 mr-2" />
@@ -235,7 +235,7 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
                     '/picpeak-logo-transparent.png'
                   }
                   alt="Event logo"
-                  className={`${getLogoSizeClasses(heroLogoSize)} mx-auto`}
+                  className={`gallery-hero-logo ${getLogoSizeClasses(heroLogoSize)} mx-auto`}
                   style={{
                     filter: eventLogo
                       ? 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5))'
@@ -250,7 +250,7 @@ export const HeroHeader: React.FC<HeroHeaderProps> = ({
         {/* Scroll Indicator */}
         <button
           onClick={handleScrollToContent}
-          className="absolute bottom-8 left-1/2 transform -translate-x-1/2 animate-bounce cursor-pointer hover:scale-110 transition-transform focus:outline-none focus:ring-2 focus:ring-white focus:ring-opacity-50 rounded-full p-2"
+          className="gallery-hero-scroll absolute bottom-8 left-1/2 transform -translate-x-1/2 animate-bounce cursor-pointer hover:scale-110 transition-transform focus:outline-none focus:ring-2 focus:ring-white focus:ring-opacity-50 rounded-full p-2"
           aria-label="Scroll to gallery"
         >
           <ChevronDown className="w-8 h-8 text-white drop-shadow-lg" />

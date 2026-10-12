@@ -3,6 +3,8 @@
  * design tokens (frontend/STYLING.md) are imported before the @font-face block.
  */
 @import './styles/tokens.css';
+/* Captured Living gallery skin (fork-only, see the file's header). */
+@import './styles/captured-living.css';
 
 /*
  * Self-hosted Inter is bootstrapped here so the very first paint —

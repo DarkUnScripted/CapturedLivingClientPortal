@@ -1,0 +1,204 @@
+/*
+ * Captured Living gallery skin (fork-only file).
+ *
+ * Restyles the public gallery to the Captured Living design: charcoal top bar
+ * with the logo, a charcoal address panel on the hero photo, 3:2 photo tiles
+ * with near-square corners and a charcoal footer. Colours, fonts and layout
+ * choices that PicPeak exposes in Branding stay there; this file only covers
+ * what Branding cannot express.
+ *
+ * Everything is scoped to .gallery-page so the admin and the customer portal
+ * are untouched. The hooks it targets (gallery-hero-*, cl-bar-logo) are the
+ * small additions in HeroHeader.tsx and GalleryLayout.tsx.
+ */
+
+.gallery-page {
+  --cl-charcoal: #272D33;
+  --cl-charcoal-deep: #1E2328;
+  --cl-charcoal-line: #4A535C;
+  --cl-greige: #C2BDB2;
+  --cl-paper: #F5F2EC;
+  --cl-paper-soft: #E4E0D8;
+  --cl-gold: #D4A03A;
+  --cl-gold-hover: #E6B85A;
+}
+
+/* ---- Top bar ------------------------------------------------------------ */
+
+.gallery-page .gallery-header {
+  background-color: var(--cl-charcoal);
+  border-bottom-color: var(--cl-charcoal);
+  box-shadow: none;
+}
+
+.gallery-page .gallery-header .text-theme,
+.gallery-page .gallery-header .text-muted-theme {
+  color: var(--cl-paper-soft);
+}
+
+.gallery-page .cl-bar-logo img {
+  height: 2.75rem;
+}
+
+@media (min-width: 640px) {
+  .gallery-page .cl-bar-logo img {
+    height: 3.25rem;
+  }
+}
+
+.gallery-page .gallery-header .gallery-btn-download {
+  background-color: var(--cl-gold) !important;
+  border-color: var(--cl-gold) !important;
+  color: var(--cl-charcoal) !important;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.gallery-page .gallery-header .gallery-btn-download:hover {
+  background-color: var(--cl-gold-hover) !important;
+  opacity: 1;
+}
+
+.gallery-page .gallery-header .gallery-btn-logout {
+  background-color: transparent;
+  border-color: var(--cl-charcoal-line);
+  color: var(--cl-paper-soft);
+  border-radius: 4px;
+}
+
+.gallery-page .gallery-header .gallery-btn-logout:hover {
+  background-color: var(--cl-charcoal-deep);
+  color: var(--cl-paper);
+}
+
+/* Menu / sidebar toggle and any other icon buttons in the bar */
+.gallery-page .gallery-header button:not(.gallery-btn) {
+  color: var(--cl-paper-soft);
+}
+
+/* ---- Hero ----------------------------------------------------------------- */
+
+/* A lighter veil: the property photo is the point. */
+.gallery-page .gallery-hero-overlay {
+  opacity: 0.12 !important;
+}
+
+/* The logo sits in the top bar instead. */
+.gallery-page .gallery-hero-logo {
+  display: none;
+}
+
+/* Address panel, bottom left, instead of centred white text. */
+.gallery-page .gallery-hero-content {
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 0 1rem 1rem;
+}
+
+.gallery-page .gallery-hero-panel {
+  text-align: left;
+  background-color: var(--cl-charcoal);
+  padding: 1.25rem 1.5rem;
+  max-width: 40rem;
+}
+
+.gallery-page .gallery-hero-title {
+  color: var(--cl-paper);
+  font-weight: 400;
+  line-height: 1.08;
+  text-shadow: none;
+  filter: none;
+  margin-bottom: 0.75rem;
+  font-size: clamp(1.75rem, 4vw, 3.25rem);
+}
+
+.gallery-page .gallery-hero-meta {
+  justify-content: flex-start;
+  color: var(--cl-greige);
+  gap: 0.5rem 1.5rem;
+}
+
+.gallery-page .gallery-hero-meta > span {
+  font-size: 0.95rem;
+}
+
+.gallery-page .gallery-hero-meta svg {
+  color: var(--cl-gold);
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+/* Scroll hint moves to the right so it never sits on the panel; on phones
+   the panel spans the width, so the hint is dropped. */
+.gallery-page .gallery-hero-scroll {
+  display: none;
+  left: auto;
+  right: 1.5rem;
+  transform: none;
+}
+
+@media (min-width: 640px) {
+  .gallery-page .gallery-hero-scroll {
+    display: block;
+  }
+
+  .gallery-page .gallery-hero-content {
+    padding: 0 2.5rem 2.5rem;
+  }
+
+  .gallery-page .gallery-hero-panel {
+    padding: 2rem 2.5rem;
+  }
+
+  .gallery-page .gallery-hero-meta > span {
+    font-size: 1.05rem;
+  }
+}
+
+/* ---- Photo grid ----------------------------------------------------------- */
+
+/* PicPeak adds a column on wide screens (xl); the design keeps three. */
+@media (min-width: 1280px) {
+  .gallery-page .photo-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Listing photos are landscape: 3:2 tiles instead of square crops. */
+.gallery-page .photo-card {
+  aspect-ratio: 3 / 2;
+}
+
+.gallery-page .photo-card img,
+.gallery-page .photo-card .rounded-lg {
+  border-radius: 2px;
+}
+
+/* ---- Footer ----------------------------------------------------------------- */
+
+.gallery-page .gallery-footer {
+  background-color: var(--cl-charcoal);
+  border-top-color: var(--cl-charcoal);
+  margin-top: 4rem;
+  padding-top: 3rem;
+  padding-bottom: 3rem;
+}
+
+.gallery-page .gallery-footer,
+.gallery-page .gallery-footer .text-muted-theme,
+.gallery-page .gallery-footer .text-theme {
+  color: var(--cl-greige);
+}
+
+.gallery-page .gallery-footer a {
+  color: var(--cl-gold);
+}
+
+.gallery-page .gallery-footer a:hover {
+  color: var(--cl-gold-hover);
+  opacity: 1;
+}
+
+.gallery-page .gallery-footer svg {
+  color: var(--cl-greige);
+}

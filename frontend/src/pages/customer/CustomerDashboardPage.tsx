@@ -39,6 +39,7 @@ import { galleryService } from '../../services/gallery.service';
 import { isDownloadLimitError } from '../../utils/downloadLimit';
 import { storeGalleryToken, setActiveGallerySlug } from '../../utils/galleryAuthStorage';
 import { calendarDay } from '../../utils/calendarDay';
+import { DashboardIntro } from '../../captured-living/DashboardIntro';
 
 type SortKey = 'newest' | 'oldest' | 'name';
 
@@ -308,6 +309,8 @@ export const CustomerDashboardPage: React.FC = () => {
         </div>
       ) : (
         <>
+          {/* Captured Living: welcome line and latest delivery (fork-only). */}
+          <DashboardIntro events={activeEvents} onOpen={(slug) => { void openEvent(slug); }} openingSlug={openingSlug} />
           <NeedsAction items={data.needsAction} />
           <Recent items={data.recent ?? []} />
 

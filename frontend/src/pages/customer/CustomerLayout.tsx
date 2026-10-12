@@ -74,10 +74,12 @@ export const CustomerLayout: React.FC = () => {
   // The portal follows the operator's palette (usePublicDarkMode puts the
   // theme tokens in charge on <html>, dialogs included). `isDark` picks the
   // logo; symmetric fallback so a single uploaded logo serves both modes.
-  const { isDark: customerIsDark } = usePublicDarkMode();
+  usePublicDarkMode();
   const lightLogo = settingsData?.branding_logo_url?.trim();
   const darkLogo = settingsData?.branding_logo_url_dark?.trim();
-  const logoUrl = customerIsDark ? (darkLogo || lightLogo) : (lightLogo || darkLogo);
+  // Captured Living: the sidebar is charcoal in our theme
+  // (styles/captured-living.css), so the dark-background logo comes first.
+  const logoUrl = darkLogo || lightLogo;
   const resolvedLogoUrl = logoUrl || '/picpeak-logo-transparent.png';
 
   // Filter out feature-gated entries the customer can't see. Galleries +
@@ -114,7 +116,7 @@ export const CustomerLayout: React.FC = () => {
     || (customer?.email ? customer.email.split('@')[0] : '');
 
   return (
-    <div className="h-screen flex overflow-hidden bg-background">
+    <div className="cl-portal h-screen flex overflow-hidden bg-background">
       {/* Mobile backdrop */}
       {sidebarOpen && (
         <div
@@ -126,13 +128,13 @@ export const CustomerLayout: React.FC = () => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 border-r bg-surface border-border-token transform transition-transform duration-200 ease-in-out lg:relative lg:translate-x-0 lg:h-screen ${
+        className={`cl-portal-sidebar fixed inset-y-0 left-0 z-50 w-64 border-r bg-surface border-border-token transform transition-transform duration-200 ease-in-out lg:relative lg:translate-x-0 lg:h-screen ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <div className="flex flex-col h-screen lg:h-full">
           {/* Brand */}
-          <div className="flex items-center justify-between h-16 px-4 border-b border-border-token flex-shrink-0">
+          <div className="cl-portal-brand flex items-center justify-between h-16 px-4 border-b border-border-token flex-shrink-0">
             <Link
               to="/customer/dashboard"
               className="flex items-center gap-2 min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 rounded"
@@ -179,7 +181,7 @@ export const CustomerLayout: React.FC = () => {
                   // Active: the filled accent with the label colour applyTheme()
                   // picks for it. Rest: the theme's text, the elevated
                   // surface on hover (the admin sidebar's subtle grey).
-                  className={`flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  className={`cl-portal-nav-link ${isActive ? 'is-active' : ''} flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                     isActive ? 'bg-accent-strong text-accent-fg' : 'text-theme hover:bg-elevated'
                   }`}
                 >
@@ -191,7 +193,7 @@ export const CustomerLayout: React.FC = () => {
           </nav>
 
           {/* Footer (logout + greeting on a single line, mirrors admin) */}
-          <div className="border-t border-border-token px-4 py-3 flex items-center justify-between gap-2">
+          <div className="cl-portal-sidebar-footer border-t border-border-token px-4 py-3 flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-sm font-medium text-theme truncate">{greetingName}</div>
               <div className="text-xs text-muted-theme truncate">{customer?.email}</div>
@@ -211,7 +213,7 @@ export const CustomerLayout: React.FC = () => {
 
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0 h-screen">
-        <header className="lg:hidden h-14 px-4 flex items-center justify-between border-b bg-surface border-border-token flex-shrink-0">
+        <header className="cl-portal-topbar lg:hidden h-14 px-4 flex items-center justify-between border-b bg-surface border-border-token flex-shrink-0">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
@@ -225,7 +227,8 @@ export const CustomerLayout: React.FC = () => {
         </header>
 
         <main id="customer-main" className="flex-1 overflow-y-auto">
-          <Outlet />
+          {/* Captured Living: the dashboard intro greets by first name. */}
+          <Outlet context={{ clFirstName: customer?.firstName || customer?.displayName || '' }} />
         </main>
 
         <footer className="py-4 px-4 text-center text-xs text-muted-theme">

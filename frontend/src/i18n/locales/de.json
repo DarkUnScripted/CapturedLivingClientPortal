@@ -843,9 +843,23 @@
     "hidePassword": "Passwort verbergen",
     "showPassword": "Passwort anzeigen",
     "loadFailed": "Konnte nicht geladen werden",
-    "moreActions": "Weitere Aktionen"
+    "moreActions": "Weitere Aktionen",
+    "previousMonth": "Vorheriger Monat",
+    "nextMonth": "Nächster Monat",
+    "today": "Heute",
+    "chooseDate": "Datum wählen"
   },
   "upload": {
+    "duplicates": {
+      "title_one": "{{count}} Datei ist bereits in dieser Galerie",
+      "title_other": "{{count}} Dateien sind bereits in dieser Galerie",
+      "toast_one": "{{count}} Datei ist bereits in dieser Galerie und wurde übersprungen – Details in der Upload-Leiste oben.",
+      "toast_other": "{{count}} Dateien sind bereits in dieser Galerie und wurden übersprungen – Details in der Upload-Leiste oben.",
+      "badge": "Duplikat",
+      "sameAs": "gleicher Inhalt wie {{name}}",
+      "uploadAnyway": "Trotzdem hochladen",
+      "uploadAllAnyway": "Alle trotzdem hochladen"
+    },
     "capacity": {
       "decoded": "Dieses Bild überschreitet die Bildverarbeitungsgrenzen des Servers.",
       "imagePixels": "Dieses Bild ist größer als die {{max}} Megapixel, die dieser Server verarbeitet.",
@@ -886,6 +900,7 @@
     "processingProgress": "{{complete}} von {{total}} fertig",
     "processingFailed_one": "{{count}} Foto konnte nicht verarbeitet werden",
     "processingFailed_other": "{{count}} Fotos konnten nicht verarbeitet werden",
+    "heldForReview": "Vielen Dank! Ihre Fotos erscheinen in der Galerie, sobald der Fotograf sie freigegeben hat.",
     "processingStillRunning": "Ihr Upload wird noch verarbeitet — er erscheint in Kürze in der Galerie.",
     "retryFailed": "Fehlgeschlagene erneut versuchen",
     "uploadComplete": "Upload abgeschlossen!",
@@ -910,6 +925,7 @@
     "uploadMedia": "Fotos & Videos hochladen",
     "maxFilesReached": "Maximal {{limit}} Dateien erlaubt",
     "someFilesSkipped": "Nur {{allowed}} weitere Dateien erlaubt (Limit {{limit}})",
+    "filesOverLimit": "{{allowed}} von {{found}} Dateien hinzugefügt. Ein Upload fasst höchstens {{limit}} Dateien; lade den Rest separat hoch.",
     "folderTooLarge": "Der Ordner ist zu groß, um ihn vollständig zu durchsuchen. Es wurde nur ein Teil hinzugefügt; ziehe Unterordner einzeln hinein.",
     "tooManyFiles": "Maximal {{limit}} Dateien können gleichzeitig hochgeladen werden",
     "limitInfo": "{{selected}} von {{limit}} Dateien ausgewählt ({{remaining}} verbleibend)",
@@ -973,7 +989,11 @@
       "firstLookCallout_other": "First-look-Ordner gefunden: „{{name}}“. Seine {{count}} Fotos werden als „First look“ markiert, und die Galerie wechselt zur zweistufigen Auslieferung: Gäste sehen, dass weitere Fotos unterwegs sind, bis Sie die vollständige Galerie als fertig markieren.",
       "firstLookSettings": "Fälligkeit und Badge: Einstellungen dieser Galerie → Ordner & Auslieferung. Stichwörter: Einstellungen → Events.",
       "nothingToUpload": "Keine der ausgewählten Dateien kann hochgeladen werden: Alle liegen in versteckten oder übersprungenen Ordnern.",
-      "keptForNext": "Dateien, die während der Vorbereitung der Ordner hinzukamen, sind noch ausgewählt: {{count}}."
+      "keptForNext": "Dateien, die während der Vorbereitung der Ordner hinzukamen, sind noch ausgewählt: {{count}}.",
+      "overFolderLimit_one": "Dieser Upload würde {{adding}} Ordner anlegen, die Galerie hat aber schon {{current}} von höchstens {{limit}}. Schalten Sie „Ordnerstruktur übernehmen“ aus oder entfernen Sie zuerst Ordner.",
+      "overFolderLimit_other": "Dieser Upload würde {{adding}} Ordner anlegen, die Galerie hat aber schon {{current}} von höchstens {{limit}}. Schalten Sie „Ordnerstruktur übernehmen“ aus oder entfernen Sie zuerst Ordner.",
+      "overRequestLimit_one": "Dieser Upload würde {{adding}} Ordneranfrage stellen, die Galerie hat aber schon {{current}} von höchstens {{limit}} offenen. Bitten Sie eine Administratorin oder einen Administrator, zuerst einige zu genehmigen oder abzulehnen, oder schalten Sie „Ordnerstruktur übernehmen“ aus.",
+      "overRequestLimit_other": "Dieser Upload würde {{adding}} Ordneranfragen stellen, die Galerie hat aber schon {{current}} von höchstens {{limit}} offenen. Bitten Sie eine Administratorin oder einen Administrator, zuerst einige zu genehmigen oder abzulehnen, oder schalten Sie „Ordnerstruktur übernehmen“ aus."
     },
     "largeFileReplaceSkipped": "Ersetzen nach Dateiname ist für Dateien über der Stapelgröße nicht möglich; laden Sie die Datei ohne Ersetzen hoch.",
     "removeFile": "{{name}} entfernen"
@@ -1028,6 +1048,10 @@
     "addFiles": "Dateien hinzufügen",
     "noUploadedFiles": "Keine hochgeladenen Dateien. Fügen Sie Dateien von Ihrem Computer hinzu, um sie in den Download aufzunehmen.",
     "sentTo": "Per E-Mail an",
+    "emailHeld": "E-Mail zurückgehalten, bis ein Foto fertig ist",
+    "heldHeading": "E-Mail wartet, bis ein Foto fertig ist",
+    "heldBadge": "Noch nicht gesendet",
+    "heldHint": "Noch kein Foto in diesem Transfer ist fertig verarbeitet. Die E-Mail geht von selbst raus, sobald eines fertig ist.",
     "delivery": {
       "link": "Link teilen",
       "email": "Per E-Mail senden"
@@ -1484,7 +1508,8 @@
       "latestAttempt": "Letzter Versuch",
       "latestAttemptRunning": "Letzter Versuch läuft seit",
       "latestAttemptFailed": "Letzter Versuch fehlgeschlagen",
-      "lastSuccessfulBackup": "Letztes erfolgreiches Backup"
+      "lastSuccessfulBackup": "Letztes erfolgreiches Backup",
+      "signingKeyInvalid": "Der Backup-Signaturschlüssel ist nicht nutzbar. Backups schlagen fehl, bis er korrigiert ist."
     },
     "actions": {
       "runBackupNow": "Backup jetzt starten",
@@ -1603,9 +1628,6 @@
         },
         "customCron": "Cron-Ausdruck",
         "customCronHelp": "Geben Sie einen gültigen Cron-Ausdruck ein (z.B. 0 3 * * *)",
-        "retention": "Aufbewahrungszeitraum",
-        "retentionDays": "Backups aufbewahren für",
-        "retentionHelp": "Tage (ältere Backups werden automatisch gelöscht)",
         "retentionCount": "Aufzubewahrende Wiederherstellungspunkte",
         "retentionCountHelp": "Vollständige Wiederherstellungspunkte, die an einem lokalen oder S3-Ziel aufbewahrt werden. Ältere werden nach jedem erfolgreichen Backup gelöscht. 0 behält alle."
       },
@@ -1949,6 +1971,8 @@
     "commented": "Kommentiert",
     "needHelp": "Hilfe benötigt? Kontaktieren Sie uns unter",
     "noPhotosFound": "Keine Fotos gefunden",
+    "noPhotosMatch": "Keine Fotos passen zu Ihrer Suche oder Ihren Filtern.",
+    "noPhotosYet": "Hier gibt es noch keine Fotos.",
     "failedToLoad": "Fotos konnten nicht geladen werden",
     "tryAgain": "Erneut versuchen",
     "passwordChangeRequired": "Ändern Sie Ihr Passwort im Admin-Bereich, bevor Sie diese Galerie in der Vorschau ansehen.",
@@ -1966,6 +1990,10 @@
     "cancelSelection": "Auswahl abbrechen",
     "selectAll": "Alle auswählen",
     "deselectAll": "Auswahl aufheben",
+    "selectionTray": {
+      "title": "Ausgewählt ({{count}})",
+      "remove": "{{name}} aus der Auswahl entfernen"
+    },
     "copyFilenames": {
       "button": "Dateinamen kopieren",
       "title": "Dateinamen kopieren",
@@ -2007,10 +2035,14 @@
     "thankYou": "Vielen Dank",
     "thankYouMessage": "Dass Sie Teil unserer Geschichte waren und unseren besonderen Tag unvergesslich gemacht haben.",
     "favorites": "Favoriten",
+    "showLikedOnly": "Nur Fotos anzeigen, die mir gefallen",
+    "likedOnlyEmpty": "Hier haben Sie noch kein Foto mit dem Herz markiert. Tippen Sie bei einem Foto auf das Herz, um es hier wiederzufinden.",
+    "showAllPhotos": "Alle Fotos anzeigen",
     "expiresIn_one": "Galerie läuft in {{count}} Tag ab",
     "expiresIn_other": "Galerie läuft in {{count}} Tagen ab",
     "downloading_one": "1 Foto wird heruntergeladen…",
     "downloading_other": "{{count}} Fotos werden heruntergeladen…",
+    "downloadingInParts": "{{count}} Fotos werden als {{parts}} ZIP-Dateien heruntergeladen…",
     "photosSelected_one": "{{count}} Foto ausgewählt",
     "photosSelected_other": "{{count}} Fotos ausgewählt",
     "favoriteSelected_one": "{{count}} Foto favorisieren",
@@ -2076,6 +2108,10 @@
     "downloadNow": "Herunterladen",
     "downloadPrepFailed": "Vorbereitung fehlgeschlagen",
     "downloadPrepTimeout": "Das dauert länger als erwartet. Bitte erneut versuchen.",
+    "fullResolution": {
+      "loading": "Volle Auflösung wird geladen…",
+      "readout": "100 % entspricht der Originalgröße, Pixel für Pixel"
+    },
     "people": {
       "title": "Personen in dieser Galerie",
       "showAll": "Alle {{count}} anzeigen",
@@ -2116,6 +2152,9 @@
     "backToGallery": "Alle Fotos",
     "downloadFolder": "Ordner herunterladen ({{count}})",
     "downloadFolderCapped": "Erste {{limit}} von {{total}} herunterladen",
+    "downloadSelectionTooLarge": "Du kannst höchstens {{limit}} Fotos auf einmal herunterladen. Bitte wähle weniger Fotos aus.",
+    "newPhotos_one": "{{count}} neues Foto",
+    "newPhotos_other": "{{count}} neue Fotos",
     "downloadEverything": "Alle Fotos herunterladen",
     "downloadFolder_one": "Ordner herunterladen ({{count}})",
     "downloadFolder_other": "Ordner herunterladen ({{count}})",
@@ -2143,6 +2182,11 @@
       "uploadedBy": "Hochgeladen von {{name}}",
       "photoBy": "Foto von {{name}}"
     },
+    "filmStrip": {
+      "label": "Fotos",
+      "photo": "Foto {{position}} von {{total}}",
+      "photoNamed": "Foto {{position}} von {{total}}: {{name}}"
+    },
     "firstLook": "Erste Auswahl",
     "viewAllPhotos": "Alle Fotos",
     "viewSwitch": "Fotos anzeigen nach",
@@ -2168,6 +2212,96 @@
     "preview": {
       "title": "Theme-Vorschau",
       "description": "So sehen Ihre Galerien mit den aktuellen Theme-Einstellungen aus."
+    },
+    "preparedDownload": "Ihr vorbereiteter Download",
+    "downloadNotify": "Per E-Mail benachrichtigen, wenn er bereit ist",
+    "downloadNotifyRequested": "Wir senden Ihnen eine E-Mail, sobald der Download bereit ist. Sie können dieses Fenster schließen.",
+    "downloadNotifyFailed": "Die E-Mail-Benachrichtigung konnte nicht eingerichtet werden. Bitte lassen Sie dieses Fenster geöffnet.",
+    "downloadGone": "Dieser Download ist nicht mehr verfügbar. Bitte fordern Sie ihn erneut an.",
+    "selection": {
+      "counterCapped": "{{used}} von {{cap}} ausgewählt",
+      "counter": "{{used}} ausgewählt",
+      "finish": "Auswahl abschließen",
+      "finishTitle": "Auswahl abschließen?",
+      "finishCount": "Ausgewählte Fotos: {{count}}",
+      "finishBody": "Ihre Auswahl geht an den Fotografen. Danach können Sie sie nicht mehr ändern; der Fotograf kann sie für Sie wieder öffnen.",
+      "finishSuccess": "Ihre Auswahl wurde an den Fotografen gesendet",
+      "finishedOn": "Auswahl abgeschlossen am {{date}}. Ihre Auswahl ist gesperrt.",
+      "approve": "Bearbeitete Fotos freigeben",
+      "approveTitle": "Bearbeitete Fotos freigeben?",
+      "approveBody": "Sie bestätigen, dass die bearbeiteten Fotos so in Ordnung sind und der Fotograf weitermachen kann. Danach können Sie Ihre Freigaben und Ablehnungen nicht mehr ändern; der Fotograf kann sie für Sie wieder öffnen.",
+      "approveRejected": "Noch als abgelehnt markierte Fotos: {{count}}",
+      "approveConfirm": "Freigeben",
+      "identityApproval": "Ihre Freigabe",
+      "identitySelection": "Ihre Auswahl",
+      "identityInvalid": "Bitte prüfen Sie Name und E-Mail. Ein Name darf Buchstaben, Ziffern, Leerzeichen, Bindestriche, Apostrophe und Punkte enthalten.",
+      "approveSuccess": "Ihre Freigabe wurde an den Fotografen gesendet",
+      "approvedOn": "Bearbeitete Fotos freigegeben am {{date}}",
+      "noteLabel": "Anmerkung für den Fotografen (optional)",
+      "noteBlocked": "Ihre Anmerkung enthält Wörter, die hier nicht erlaubt sind.",
+      "nothingSelected": "Wählen Sie zuerst mindestens ein Foto aus",
+      "submitError": "Senden fehlgeschlagen. Bitte versuchen Sie es erneut.",
+      "lockedSelection": "Ihre Auswahl ist abgeschlossen und kann nicht mehr geändert werden. Bitten Sie den Fotografen, sie wieder zu öffnen.",
+      "lockedApproval": "Sie haben die bearbeiteten Fotos freigegeben, Ihre Freigaben und Ablehnungen können nicht mehr geändert werden. Bitten Sie den Fotografen, sie wieder zu öffnen."
+    },
+    "tags": {
+      "filterLabel": "Tags",
+      "matchAny": "Zeigt Fotos mit mindestens einem der gewählten Tags.",
+      "names": {
+        "ceremony": "Zeremonie",
+        "couple": "Paar",
+        "portrait": "Porträt",
+        "group_photo": "Gruppenfoto",
+        "kiss": "Kuss",
+        "hug": "Umarmung",
+        "laughter": "Lachen",
+        "dancing": "Tanzen",
+        "party": "Party",
+        "speech": "Rede",
+        "toast": "Anstoßen",
+        "music": "Musik",
+        "stage": "Bühne",
+        "audience": "Publikum",
+        "presentation": "Präsentation",
+        "awards": "Auszeichnungen",
+        "sports": "Sport",
+        "getting_ready": "Vorbereitungen",
+        "dress": "Kleid",
+        "rings": "Ringe",
+        "bouquet": "Brautstrauß",
+        "flowers": "Blumen",
+        "cake": "Torte",
+        "food": "Essen",
+        "drinks": "Getränke",
+        "table_setting": "Tischdekoration",
+        "decoration": "Dekoration",
+        "lights": "Kerzen & Lichter",
+        "gifts": "Geschenke",
+        "confetti": "Konfetti",
+        "fireworks": "Feuerwerk",
+        "details": "Details",
+        "venue": "Location",
+        "indoor": "Drinnen",
+        "outdoor": "Draußen",
+        "landscape": "Landschaft",
+        "beach": "Strand",
+        "sunset": "Sonnenuntergang",
+        "night": "Nacht",
+        "vehicle": "Auto",
+        "pets": "Haustiere",
+        "black_and_white": "Schwarz-Weiß"
+      }
+    },
+    "tile": {
+      "viewFullSize": "Vollbild anzeigen",
+      "downloadPhoto": "Foto herunterladen",
+      "commentOnPhoto": "Foto kommentieren",
+      "likePhoto": "Foto mit Gefällt mir markieren",
+      "unlikePhoto": "Gefällt mir zurücknehmen",
+      "comment": "Kommentieren",
+      "like": "Gefällt mir",
+      "unlike": "Gefällt mir zurücknehmen",
+      "selectPhoto": "{{name}} auswählen"
     }
   },
   "categories": {
@@ -2214,7 +2348,10 @@
   "events": {
     "revealMode": "Reveal-Modus (Galerie bis zur Freigabe verbergen)",
     "revealModeHelp": "Gäste können hochladen, sehen aber keine Fotos, bis Sie die Galerie freigeben — manuell oder zum geplanten Zeitpunkt. Diashow und Kundenzugang funktionieren weiter.",
+    "liveRefresh": "Live-Aktualisierung (Gäste auf neue Fotos hinweisen)",
+    "liveRefreshHelp": "Eine geöffnete Galerie prüft alle 20 Sekunden, ob neue Fotos da sind, und bietet Gästen eine Schaltfläche „Neue Fotos“ an. Nichts wird von selbst neu geladen.",
     "revealAt": "Geplante Freigabe (optional)",
+    "revealAtTime": "Uhrzeit der Freigabe",
     "revealAtHelp": "Leer lassen, um manuell mit „Jetzt freigeben\" freizugeben.",
     "revealModeStatus": "Reveal-Modus",
     "revealed": "Freigegeben",
@@ -2271,6 +2408,7 @@
     "uploadPhotos": "Fotos hochladen",
     "archiveEvent": "Galerie archivieren",
     "archiveConfirm": "Sind Sie sicher, dass Sie diese Galerie archivieren möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
+    "archiveInProgress": "Diese Galerie wird gerade archiviert. Versuchen Sie es erneut, sobald die Archivierung abgeschlossen ist.",
     "extendExpiration": "Um {{days}} Tage verlängern",
     "backToEvents": "Alle Galerien",
     "loadingEventDetails": "Veranstaltungsdetails werden geladen...",
@@ -2393,22 +2531,29 @@
     "userUploads": "Benutzer-Upload-Einstellungen",
     "allowUserUploads": "Gästen erlauben, Fotos hochzuladen",
     "allowUserUploadsHelp": "Ermöglichen Sie Gästen, ihre eigenen Fotos in diese Galerie hochzuladen",
+    "moderateGuestUploads": "Gast-Uploads vor der Veröffentlichung freigeben",
+    "moderateGuestUploadsHelp": "Uploads von Gästen bleiben für Gäste und Kunden verborgen, bis Sie oder ein Prüfer sie im Tab „Fotos“ freigeben. Abgelehnte Uploads bleiben verborgen. Wartende Uploads zählen zum Foto-Limit.",
     "allowUserUploadsDescription": "Ermöglichen Sie Gästen, ihre eigenen Fotos in diese Galerie hochzuladen",
     "uploadCategory": "Upload-Kategorie",
     "selectCategory": "Wählen Sie eine Kategorie für Benutzer-Uploads",
     "uploadCategoryHelp": "Alle von Benutzern hochgeladenen Fotos werden dieser Kategorie hinzugefügt",
+    "guestUploadMaxEdge": "Längste Kante von Gästefotos (px)",
+    "guestUploadMaxEdgeHelp": "Größere JPEG-, PNG- und WebP-Fotos werden vor dem Hochladen auf dem Gerät des Gastes verkleinert. Das spart Datenvolumen und Speicherplatz. Leer lassen, um Originale zu behalten. Andere Formate und Videos werden immer unverändert gesendet.",
+    "guestUploadMaxEdgeInvalid": "Die längste Kante muss eine ganze Zahl von 1024 bis 16384 sein oder leer bleiben.",
     "allowDownloads": "Foto-Downloads erlauben",
     "downloadsDisabled": "Downloads deaktiviert",
     "downloadProtection": "Download-Schutz",
     "disableRightClick": "Rechtsklick-Menü blockieren",
     "watermarkDownloads": "Wasserzeichen bei Downloads hinzufügen",
+    "watermarkText": "Wasserzeichen-Text",
+    "watermarkTextHelp": "Ersetzt den Firmennamen im Text-Wasserzeichen dieser Galerie. Leer lassen, um den Firmennamen zu verwenden. Wird nicht angezeigt, wenn unter Branding ein Wasserzeichen-Logo gesetzt ist.",
     "enableDevtoolsProtection": "Entwicklertools erkennen",
     "useCanvasRendering": "Canvas-Rendering in der Lightbox (erweiterter Schutz)",
     "protectionInfo": "Schutzfunktionen helfen, unerlaubte Downloads zu verhindern, können jedoch nicht alle Methoden blockieren.",
     "protectionLevelBasic": "Einfach - Nur Rechtsklick-Sperre",
     "protectionLevelStandard": "Standard - Tastenkombinationen blockiert",
     "protectionLevelEnhanced": "Erweitert - Bildschirmfoto-Erkennung",
-    "protectionLevelMaximum": "Maximum - DevTools-Erkennung & Canvas-Rendering",
+    "protectionLevelMaximum": "Maximum - DevTools-Erkennung, Canvas-Rendering & Großansicht auf 1920×1080 begrenzt",
     "heroLogoSettings": "Hero-Logo-Einstellungen",
     "heroLogoVisible": "Logo im Hero-Bereich anzeigen",
     "heroLogoInherit": "Branding-Standard verwenden",
@@ -2698,6 +2843,9 @@
       "watchHelp": "Neue Fotos im Ordner erscheinen von selbst."
     },
     "externalSource": {
+      "missingFiles_one": "{{count}} Datei fehlt",
+      "missingFiles_other": "{{count}} Dateien fehlen",
+      "missingFilesHint": "Die Fotos zeigen, deren Datei nicht mehr im Ordner liegt",
       "alreadyRunning": "Für diesen Ordner läuft bereits ein Import.",
       "changeFolder": "Ordner ändern",
       "importNow": "Jetzt importieren",
@@ -2720,7 +2868,8 @@
       "structureApplied_one": "{{count}} Foto in Ordner verschoben",
       "structureApplied_other": "{{count}} Fotos in Ordner verschoben",
       "structureNothing": "Alle Fotos aus Unterordnern liegen bereits in einem Ordner",
-      "structureFailed": "Die Ordnerstruktur konnte nicht übernommen werden"
+      "structureFailed": "Die Ordnerstruktur konnte nicht übernommen werden",
+      "structureLimited": "Die Galerie hat ihre Höchstzahl an Ordnern erreicht: Einige Fotos liegen im nächstgelegenen vorhandenen Ordner."
     },
     "header": {
       "moreActions": "Weitere Aktionen"
@@ -2753,7 +2902,8 @@
         "reminder": "Die Erinnerungs-E-Mail an den Kunden vor dem Event.",
         "slideshow": "Ein Vollbild-Link für Beamer bei Live-Events.",
         "source": "Woher die Fotos dieser Galerie kommen.",
-        "delivery": "Verschachtelte Ordner aus Uploads und eine erste Auswahl vor der vollständigen Galerie."
+        "delivery": "Verschachtelte Ordner aus Uploads und eine erste Auswahl vor der vollständigen Galerie.",
+        "tags": "Fotos nach Szenen taggen, damit Gäste die Galerie filtern können."
       },
       "access": "Zugang",
       "appearance": "Erscheinungsbild",
@@ -2824,6 +2974,7 @@
         "reminderOn": "Versand am {{date}}",
         "uploaded": "In PicPeak hochgeladen",
         "uploadsOff": "Uploads aus",
+        "uploadsApproved": "Freigabe erforderlich",
         "uploadsOn": "Uploads an",
         "watching": "wird überwacht",
         "watermarked": "mit Wasserzeichen",
@@ -2834,11 +2985,14 @@
         "firstLook": "erste Auswahl, mehr folgt",
         "teamMembers_one": "{{count}} Teammitglied",
         "teamMembers_other": "{{count}} Teammitglieder",
-        "teamReview": "Team-Uploads werden geprüft"
+        "teamReview": "Team-Uploads werden geprüft",
+        "tags": "Fotos nach Szenen taggen, damit Gäste filtern können"
       },
       "undoSection": "Diesen Bereich zurücksetzen",
       "delivery": "Ordner & Auslieferung",
-      "passwordOwnerOnly": "Nur der Besitzer der Galerie kann das Passwort ändern oder ausschalten."
+      "passwordOwnerOnly": "Nur der Besitzer der Galerie kann das Passwort ändern oder ausschalten.",
+      "recipientsOwnerOnly": "Nur der Besitzer der Galerie kann ändern, wer die Galerie-E-Mail erhält.",
+      "tags": "Tags"
     },
     "folders": {
       "sectionTitle": "Ordner",
@@ -2927,7 +3081,31 @@
     "noEventsYet": "Noch keine Galerien",
     "noEventsYetHint": "Erstellen Sie eine Galerie, um Fotos mit einem Kunden zu teilen.",
     "downloadLimitResetAction": "Downloads zurücksetzen",
-    "notFoundHint": "Sie wurde vielleicht gelöscht, oder der Link ist falsch."
+    "notFoundHint": "Sie wurde vielleicht gelöscht, oder der Link ist falsch.",
+    "expiryPresets": {
+      "label": "Schnellauswahl für den Ablauf",
+      "days": "{{days}} Tage",
+      "fromToday": "Ab heute:"
+    },
+    "nextSteps": {
+      "title": "Vor dem Teilen",
+      "progress": "{{done}} von {{total}} erledigt",
+      "done": "Erledigt",
+      "todo": "Offen",
+      "photos": "Fotos hinzufügen",
+      "photosLink": "Fotos öffnen",
+      "customer": "Kunden-E-Mail oder Kundenkonto hinzufügen",
+      "customerLink": "Einstellungen öffnen",
+      "publish": "Galerie veröffentlichen",
+      "publishLink": "Veröffentlichen"
+    },
+    "showExifToGuests": "Kameradaten den Gästen anzeigen",
+    "showExifToGuestsHelp": "Kamera, Objektiv, Brennweite, Blende, Belichtungszeit und ISO erscheinen in der Vollbildansicht unter dem Foto. Standort und Seriennummern werden nie gespeichert oder angezeigt.",
+    "welcomeEditor": {
+      "lineBreaksPreserved": "Zeilenumbrüche bleiben in E-Mails erhalten",
+      "tip": "Tipp: Mit der Eingabetaste beginnst du eine neue Zeile. Jede Zeile erscheint in E-Mails als eigener Absatz.",
+      "preview": "Vorschau:"
+    }
   },
   "settings": {
     "title": "Systemeinstellungen",
@@ -2945,6 +3123,10 @@
       "maxVideoSizeHelp": "Eigenes Limit pro Videodatei, damit für Fotos ein kleineres Limit gelten kann.",
       "videoWebRendition": "Browser-abspielbare Kopien von Videos",
       "videoWebRenditionHelp": "Kodiert Videos, die ein Browser nicht abspielen kann (HEVC, QuickTime, nicht streambare MP4s), für die Wiedergabe in ein H.264-MP4 um. Zum Herunterladen bleibt das Original. Kostet CPU pro Video und eine zweite Datei; beim Einschalten werden die bereits hochgeladenen Videos eingereiht.",
+      "videoStripMetadata": "Standort- und Gerätedaten aus abgespielten Videos entfernen",
+      "videoStripMetadataHelp": "Videos, die ein Browser bereits abspielen kann, erhalten eine Kopie ohne Aufnahmeort, Kamera und andere Metadaten, erstellt ohne Neukodierung; Gäste sehen diese Kopie. Speichert pro solchem Video eine zusätzliche Datei, etwa so groß wie das Original. Zum Herunterladen bleibt das Original. Beim Ausschalten bleiben die bereits erstellten Kopien erhalten.",
+      "videoAdaptiveStreaming": "Adaptives Video-Streaming",
+      "videoAdaptiveStreamingHelp": "Wandelt jedes Video in einen Stream in bis zu drei Qualitäten (480p, 720p, 1080p) um, damit die Wiedergabe schnell startet und sich an die Verbindung anpasst. Zum Herunterladen bleibt das Original. Kostet CPU pro Video und etwa noch einmal so viel Speicherplatz; Videos über 30 Minuten werden wie bisher abgespielt.",
       "maxFilesPerUpload": "Max. Dateien pro Upload",
       "maxFilesPerUploadHelp": "Maximale Anzahl an Fotos pro Upload-Vorgang (1-{{max}}).",
       "maxUploadBatchSize": "Max. Upload-Paketgröße (MB)",
@@ -2985,7 +3167,9 @@
       "adminLanguageHelp": "Gilt für den Admin-Bereich, nur für Sie auf diesem Gerät. Die Änderung wirkt sofort — Speichern ist nicht nötig.",
       "customerLanguage": "Sprache für Galerie & Gäste",
       "accountCreditName": "Fotografen-Credit",
-      "accountCreditNameHelp": "Wird bei Ihren Uploads als Fotograf angegeben, wenn die Datei keinen Fotografennamen in den Metadaten enthält. Leer lassen für keinen Credit."
+      "accountCreditNameHelp": "Wird bei Ihren Uploads als Fotograf angegeben, wenn die Datei keinen Fotografennamen in den Metadaten enthält. Leer lassen für keinen Credit.",
+      "photoTrashRetention": "Aufbewahrung im Papierkorb (Tage)",
+      "photoTrashRetentionHelp": "So lange bleiben aus einer Galerie gelöschte Fotos in deren Papierkorb und lassen sich wiederherstellen. 0 löscht Fotos sofort. Fotos im Papierkorb belegen weiterhin Speicherplatz."
     },
     "publicSite": {
       "badge": "Öffentliche Landingpage",
@@ -3154,7 +3338,6 @@
       "defaultProtection": "Standard-Schutzeinstellungen",
       "defaultProtectionHelp": "Diese Einstellungen gelten für alle neuen Veranstaltungen. Einzelne Veranstaltungen können diese Standardwerte überschreiben.",
       "protectionLevel": "Standard-Schutzstufe",
-      "imageQuality": "Standard-Bildqualität",
       "enableDevtools": "DevTools-Erkennung standardmäßig aktivieren",
       "enableCanvas": "Canvas-Rendering in der Lightbox standardmäßig aktivieren (erweiterter Schutz)",
       "rateLimiting": "Ratenbegrenzung",
@@ -3170,7 +3353,6 @@
       "logEvents": "Sicherheitsereignisse in Datenbank protokollieren",
       "infoTitle": "Über Bildschutz",
       "infoText": "Diese Schutzfunktionen helfen, gelegentliches Herunterladen und Kopieren zu verhindern, können aber nicht alle Methoden blockieren. Entschlossene Benutzer finden möglicherweise trotzdem Wege, Bilder zu erfassen. Erwägen Sie die Verwendung von Wasserzeichen und rechtlichen Vereinbarungen für umfassenden Schutz.",
-      "imageQualityHelp": "1–100, höher = bessere Qualität",
       "suspiciousActivityThresholdHelp": "Verstöße, bevor als verdächtig markiert wird",
       "autoBlockThresholdHelp": "Verstöße, bevor die IP automatisch gesperrt wird"
     },
@@ -3701,6 +3883,11 @@
         "beta": "In Entwicklung: für echte Arbeit nutzbar, Details können sich noch ändern.",
         "experimental": "Kann ausfallen oder wieder entfernt werden. Nicht für den produktiven Studiobetrieb.",
         "roadmap": "Noch nicht gebaut."
+      },
+      "autoTagging": {
+        "title": "Automatische Tags",
+        "description": "Fotos nach Szenen taggen (Zeremonie, Torte, Tanzen, draußen …), damit Gäste eine Galerie filtern können. Läuft auf Ihrem eigenen Server im selben optionalen ML-Container wie die Gesichtserkennung, ergänzt um ein Tagging-Modell. Tags beschreiben Szenen, keine Personen. Bleibt aus, bis Sie es zusätzlich pro Galerie aktivieren.",
+        "lockedSingleContainer": "Im All-in-One-Image nicht verfügbar. Das Tagging benötigt den separaten ML-Container."
       }
     },
     "customerSurface": {
@@ -3832,6 +4019,53 @@
       "regenerateFailed": "Wiederherstellungscodes konnten nicht neu erzeugt werden. Prüfen Sie den Code und versuchen Sie es erneut.",
       "recoveryCodesRemaining_one": "Noch {{count}} Wiederherstellungscode übrig."
     },
+    "passkeys": {
+      "title": "Passkeys",
+      "description": "Melde dich mit Fingerabdruck, Gesichtserkennung, Geräte-PIN oder einem Sicherheitsschlüssel statt mit dem Passwort an. Ein Passkey ersetzt auch den Code der Authenticator-App.",
+      "domainNote": "Passkeys sind an {{domain}} gebunden. Zieht diese Website auf eine andere Adresse um, funktionieren sie nicht mehr und du meldest dich wieder mit dem Passwort an.",
+      "empty": "Noch keine Passkeys.",
+      "add": "Passkey hinzufügen",
+      "nameLabel": "Name",
+      "namePlaceholder": "z. B. MacBook, YubiKey",
+      "nameRequired": "Gib dem Passkey einen Namen.",
+      "passwordLabel": "Aktuelles Passwort",
+      "passwordHelp": "Bestätigt, dass du es bist, der eine neue Anmeldemöglichkeit hinzufügt.",
+      "passwordRequired": "Gib dein aktuelles Passwort ein.",
+      "codeLabel": "Code der Authenticator-App",
+      "codeHelp": "Dein Konto nutzt die Zwei-Faktor-Authentifizierung. Gib einen Code aus deiner Authenticator-App oder einen Wiederherstellungscode ein.",
+      "codeRequired": "Gib einen Code aus deiner Authenticator-App ein.",
+      "continue": "Weiter",
+      "added": "Passkey hinzugefügt.",
+      "addedOn": "Hinzugefügt am {{date}}",
+      "lastUsed": "Zuletzt verwendet am {{date}}",
+      "neverUsed": "Noch nie verwendet",
+      "rename": "Umbenennen",
+      "remove": "Entfernen",
+      "removeHelp": "„{{name}}“ entfernen? Du kannst dich danach nicht mehr damit anmelden.",
+      "removeConfirm": "Passkey entfernen",
+      "removed": "Passkey entfernt.",
+      "loadFailed": "Passkeys konnten nicht geladen werden.",
+      "errors": {
+        "cancelled": "Die Passkey-Abfrage wurde abgebrochen oder ist abgelaufen. Bitte erneut versuchen.",
+        "exists": "Dieser Passkey ist bereits registriert.",
+        "unsupported": "Dieser Browser oder dieses Gerät kann keinen Passkey erstellen.",
+        "security": "Der Browser hat das Erstellen eines Passkeys für diese Adresse abgelehnt.",
+        "limit": "Die maximale Anzahl an Passkeys ist erreicht. Entferne einen, um einen neuen hinzuzufügen.",
+        "expired": "Die Anfrage ist abgelaufen. Bitte erneut versuchen.",
+        "wrongPassword": "Das aktuelle Passwort ist falsch.",
+        "wrongCode": "Der Code ist falsch oder wurde bereits verwendet.",
+        "failed": "Etwas ist schiefgelaufen. Bitte erneut versuchen."
+      },
+      "unavailable": {
+        "not_configured": "Passkeys brauchen eine öffentliche Adresse für diese Website. Lege zuerst unten die Website-URL fest.",
+        "ip_address": "Passkeys brauchen einen Domainnamen. Diese Website ist mit einer IP-Adresse eingerichtet, daher sind sie nicht verfügbar.",
+        "insecure_origin": "Passkeys brauchen HTTPS. Diese Website ist ohne HTTPS eingerichtet, daher sind sie nicht verfügbar.",
+        "origin_mismatch": "Passkeys funktionieren nur unter {{origin}}. Öffne die Verwaltung dort, um einen hinzuzufügen oder zu verwenden.",
+        "sso_only": "Die Anmeldung mit Passwort ist zugunsten von Single Sign-on abgeschaltet, Passkeys damit ebenfalls.",
+        "sso_account": "Dein Konto meldet sich über Single Sign-on an und kann daher keine Passkeys verwenden.",
+        "unsupported": "Dieser Browser unterstützt keine Passkeys."
+      }
+    },
     "sso": {
       "title": "Single Sign-On (OIDC)",
       "intro": "Admins melden sich über Ihren Identity Provider an (Keycloak, Authentik, Pocket ID oder jeder OIDC-konforme IdP). Die lokale Anmeldung mit E-Mail/Passwort bleibt als Fallback verfügbar.",
@@ -3900,7 +4134,10 @@
       "eventIntro": "Überschreibt die globalen Download-Einstellungen nur für diese Galerie. „Erben“ folgt Einstellungen → Download-Auflösungen.",
       "inheritWith": "Erben ({{value}})",
       "effective": "Gibt derzeit heraus: {{standard}}",
-      "pickerOn": "Gäste dürfen eine andere Größe wählen"
+      "pickerOn": "Gäste dürfen eine andere Größe wählen",
+      "retention": "Vorbereitete Downloads aufbewahren für (Stunden)",
+      "retentionHint": "Wie lange ein in einer eigenen Größe vorbereiteter Download verfügbar bleibt, bevor er gelöscht wird. Mit einer längeren Dauer können Gäste ihn später abholen, jeder vorbereitete Download belegt aber etwa so viel Speicherplatz wie die enthaltenen Fotos. Gilt für Downloads, die ab jetzt vorbereitet werden.",
+      "retentionInvalid": "Geben Sie eine ganze Zahl von Stunden zwischen {{min}} und {{max}} ein."
     },
     "captureDates": {
       "title": "Aufnahmedaten",
@@ -3914,7 +4151,8 @@
       "skipped": "{{count}} Foto(s) wurden während des Laufs anderweitig geändert und daher nicht aktualisiert.",
       "description": "Trägt „Aufnahmedatum\" aus den EXIF-Daten nach, für Fotos die vor dieser Auswertung importiert wurden. Externe Importe haben nie eines gespeichert, dadurch sortieren diese Galerien nach Importreihenfolge statt nach Aufnahmezeit.",
       "skipped_one": "{{count}} Foto wurde während des Laufs anderweitig geändert und daher nicht aktualisiert.",
-      "skipped_other": "{{count}} Fotos wurden während des Laufs anderweitig geändert und daher nicht aktualisiert."
+      "skipped_other": "{{count}} Fotos wurden während des Laufs anderweitig geändert und daher nicht aktualisiert.",
+      "pendingDetails": "Fotos, die auf diesen Lauf warten: {{photos}}. Er liest auch die Kameradaten (Kamera, Objektiv, Belichtung) für Fotos, bei denen noch keine erfasst sind."
     },
     "orientationBackfill": {
       "title": "Fotoausrichtung",
@@ -3937,6 +4175,17 @@
       "running": "Urheber werden gelesen...",
       "noneToRead": "Keine Fotos mehr zu lesen",
       "button": "Urheber aus EXIF lesen"
+    },
+    "placeholderBackfill": {
+      "title": "Kachel-Platzhalter",
+      "description": "Berechnet den unscharfen Platzhalter, den eine Galerie-Kachel zeigt, während ihr Miniaturbild lädt, für Fotos, die hinzugefügt wurden, bevor es Platzhalter gab. Gelesen werden nur die gespeicherten Miniaturbilder, nie die Originale. Neue Uploads erhalten ihren Platzhalter automatisch.",
+      "total": "Fotos mit Miniaturbild",
+      "withPlaceholder": "Mit Platzhalter",
+      "withoutPlaceholder": "Ohne Platzhalter",
+      "result": "Letzter Lauf: {{success}} berechnet, {{failed}} Miniaturbilder nicht lesbar",
+      "running": "Platzhalter werden berechnet...",
+      "noneToFill": "Alle Fotos haben bereits einen Platzhalter",
+      "button": "Platzhalter berechnen"
     },
     "saveBar": {
       "unsaved": "Du hast ungespeicherte Änderungen",
@@ -4294,6 +4543,12 @@
       "natural": "Natürlich (Seitenverhältnis beibehalten)"
     },
     "storyGridModeHint": "Natürlich ordnet die Szenen in Reihen nach den Bildmaßen an, sodass Hochformate vollständig statt beschnitten gezeigt werden.",
+    "storyShowFilenames": "Dateinamen beim Überfahren zeigen",
+    "storyShowFilenamesHint": "Zeigt den Dateinamen des Fotos, wenn Gäste mit der Maus darüberfahren. Eine Galerie mit Originaldateinamen zeigt den hochgeladenen Namen.",
+    "storyFooterTitle": "Titel in der Fußzeile",
+    "storyFooterTitleHint": "Leer lassen für „Vielen Dank“.",
+    "storyFooterText": "Text in der Fußzeile",
+    "storyFooterTextHint": "Reiner Text, bis zu {{max}} Zeichen. Leer lassen, um die Willkommensnachricht zu zeigen, oder die Standard-Dankeszeile, wenn es keine gibt.",
     "typographyAndStyle": "Typografie & Stil",
     "bodyFont": "Fließtext-Schriftart",
     "headingFont": "Überschriften-Schriftart",
@@ -4983,12 +5238,21 @@
       "apiPhotosDownloaded_other": "API-Token „{{token_name}}“ hat {{count}} Originale aus {{eventName}} heruntergeladen",
       "apiPhotosZipDownloaded": "API-Token „{{token_name}}“ hat ein ZIP mit {{photo_count}} Originalen aus {{eventName}} heruntergeladen",
       "eventTeamChanged": "Team geändert für {{eventName}}",
-      "photosReviewApproved_one": "{{count}} Team-Upload in {{eventName}} freigegeben",
-      "photosReviewApproved_other": "{{count}} Team-Uploads in {{eventName}} freigegeben",
-      "photosReviewRejected_one": "{{count}} Team-Upload in {{eventName}} abgelehnt",
-      "photosReviewRejected_other": "{{count}} Team-Uploads in {{eventName}} abgelehnt",
+      "photosReviewApproved_one": "{{count}} Upload in {{eventName}} freigegeben",
+      "photosReviewApproved_other": "{{count}} Uploads in {{eventName}} freigegeben",
+      "photosReviewRejected_one": "{{count}} Upload in {{eventName}} abgelehnt",
+      "photosReviewRejected_other": "{{count}} Uploads in {{eventName}} abgelehnt",
+      "guestUploadsPendingReview_one": "{{count}} Gast-Upload in {{eventName}} wartet auf Prüfung",
+      "guestUploadsPendingReview_other": "{{count}} Gast-Uploads in {{eventName}} warten auf Prüfung",
       "photoDecision": "Foto freigegeben oder abgelehnt in {{eventName}}",
-      "guestFeedbackDecision": "Gast hat ein Foto freigegeben oder abgelehnt in {{eventName}}"
+      "guestFeedbackDecision": "Gast hat ein Foto freigegeben oder abgelehnt in {{eventName}}",
+      "selectionSubmitted": "{{guestName}} hat die Auswahl in {{eventName}} abgeschlossen (Fotos: {{count}})",
+      "approvalSubmitted": "{{guestName}} hat die bearbeiteten Fotos in {{eventName}} freigegeben",
+      "selectionReopened": "Einreichung von {{guestName}} in {{eventName}} wieder geöffnet",
+      "photosRestored_one": "{{count}} Foto aus dem Papierkorb von \"{{eventName}}\" wiederhergestellt",
+      "photosRestored_other": "{{count}} Fotos aus dem Papierkorb von \"{{eventName}}\" wiederhergestellt",
+      "photosTrashPurged_one": "{{count}} Foto endgültig aus dem Papierkorb von \"{{eventName}}\" gelöscht",
+      "photosTrashPurged_other": "{{count}} Fotos endgültig aus dem Papierkorb von \"{{eventName}}\" gelöscht"
     },
     "notificationToasts": {
       "markedAllRead": "Alle Benachrichtigungen als gelesen markiert",
@@ -5023,6 +5287,8 @@
       "collages": "Collagen",
       "noPosterFrame": "Kein Vorschaubild",
       "noPosterFrameRetry": "Vorschaubild erneut erzeugen",
+      "fileMissing": "Datei fehlt",
+      "fileMissingTooltip": "Die Datei liegt nicht mehr im externen Ordner. Gäste sehen dieses Foto nicht; es kommt zurück, sobald die Datei wieder da ist. Löschen Sie es, wenn die Datei endgültig weg ist.",
       "viewMode": "Ansicht",
       "gridView": "Rasteransicht",
       "listView": "Listenansicht",
@@ -5080,7 +5346,53 @@
       "deleteManyConfirm_one": "{{count}} Foto löschen? Es wird aus der Galerie entfernt. Das kann nicht rückgängig gemacht werden.",
       "deleteManyConfirm_other": "{{count}} Fotos löschen? Sie werden aus der Galerie entfernt. Das kann nicht rückgängig gemacht werden.",
       "deleteManyAction_one": "{{count}} Foto löschen",
-      "deleteManyAction_other": "{{count}} Fotos löschen"
+      "deleteManyAction_other": "{{count}} Fotos löschen",
+      "cameraDetails": "Kameradaten",
+      "trash": {
+        "title": "Papierkorb",
+        "intro_one": "Gelöschte Fotos lassen sich {{count}} Tag lang wiederherstellen. Danach werden sie endgültig gelöscht.",
+        "intro_other": "Gelöschte Fotos lassen sich {{count}} Tage lang wiederherstellen. Danach werden sie endgültig gelöscht.",
+        "introOff": "Fotos werden jetzt sofort gelöscht. Die hier aufgeführten bleiben, bis ihre Frist abläuft.",
+        "empty": "Der Papierkorb ist leer",
+        "emptyHelp": "Aus dieser Galerie gelöschte Fotos bleiben hier, bevor sie endgültig gelöscht werden.",
+        "loadFailed": "Der Papierkorb konnte nicht geladen werden",
+        "columnFile": "Datei",
+        "columnDeleted": "Gelöscht",
+        "columnDeletedBy": "Gelöscht von",
+        "columnRemaining": "Verbleibend",
+        "columnSize": "Größe",
+        "unknownUser": "Unbekannt",
+        "heldForReview": "Wartet auf Prüfung",
+        "heldForReviewHelp": "Dieses Foto wartete beim Löschen auf Prüfung. Nach dem Wiederherstellen bleibt es verborgen, bis es freigegeben wird.",
+        "daysLeft_one": "noch {{count}} Tag",
+        "daysLeft_other": "noch {{count}} Tage",
+        "lastDay": "weniger als ein Tag",
+        "restore": "Wiederherstellen",
+        "restoreSelected": "Wiederherstellen ({{count}})",
+        "purgeAction": "Endgültig löschen",
+        "purgeSelected": "Endgültig löschen ({{count}})",
+        "purgeOneLabel": "„{{name}}“ endgültig löschen",
+        "purgeConfirm_one": "{{count}} Foto endgültig löschen? Das kann nicht rückgängig gemacht werden.",
+        "purgeConfirm_other": "{{count}} Fotos endgültig löschen? Das kann nicht rückgängig gemacht werden.",
+        "restored_one": "{{count}} Foto wiederhergestellt",
+        "restored_other": "{{count}} Fotos wiederhergestellt",
+        "restoreFailed_one": "{{count}} Foto konnte nicht wiederhergestellt werden.",
+        "restoreFailed_other": "{{count}} Fotos konnten nicht wiederhergestellt werden.",
+        "purged_one": "{{count}} Foto endgültig gelöscht",
+        "purged_other": "{{count}} Fotos endgültig gelöscht",
+        "purgeFailed": "Die Fotos konnten nicht endgültig gelöscht werden",
+        "forDays_one": "{{count}} Tag lang",
+        "forDays_other": "{{count}} Tage lang",
+        "confirmOne": "„{{name}}“ löschen? Das Foto kommt in den Papierkorb und lässt sich {{forDays}} wiederherstellen.",
+        "confirmMany_one": "{{count}} Foto löschen? Es kommt in den Papierkorb und lässt sich {{forDays}} wiederherstellen.",
+        "confirmMany_other": "{{count}} Fotos löschen? Sie kommen in den Papierkorb und lassen sich {{forDays}} wiederherstellen.",
+        "moved_one": "{{count}} Foto in den Papierkorb verschoben",
+        "moved_other": "{{count}} Fotos in den Papierkorb verschoben",
+        "deleted_one": "{{count}} Foto gelöscht",
+        "deleted_other": "{{count}} Fotos gelöscht",
+        "deleteFailed_one": "{{count}} Foto konnte nicht gelöscht werden und ist noch in der Galerie",
+        "deleteFailed_other": "{{count}} Fotos konnten nicht gelöscht werden und sind noch in der Galerie"
+      }
     },
     "events": {
       "tabs": {
@@ -5383,10 +5695,22 @@
       "photo_decision": "Foto freigegeben oder abgelehnt in {{eventName}}",
       "guest_feedback_decision": "Gast hat ein Foto freigegeben oder abgelehnt in {{eventName}}",
       "event_team_changed": "Team geändert für {{eventName}}",
-      "photos_review_approved_one": "{{count}} Team-Upload in {{eventName}} freigegeben",
-      "photos_review_approved_other": "{{count}} Team-Uploads in {{eventName}} freigegeben",
-      "photos_review_rejected_one": "{{count}} Team-Upload in {{eventName}} abgelehnt",
-      "photos_review_rejected_other": "{{count}} Team-Uploads in {{eventName}} abgelehnt"
+      "photos_review_approved_one": "{{count}} Upload in {{eventName}} freigegeben",
+      "photos_review_approved_other": "{{count}} Uploads in {{eventName}} freigegeben",
+      "photos_review_rejected_one": "{{count}} Upload in {{eventName}} abgelehnt",
+      "photos_review_rejected_other": "{{count}} Uploads in {{eventName}} abgelehnt",
+      "guest_uploads_pending_review_one": "{{count}} Gast-Upload in {{eventName}} wartet auf Prüfung",
+      "guest_uploads_pending_review_other": "{{count}} Gast-Uploads in {{eventName}} warten auf Prüfung",
+      "selection_submitted": "{{guestName}} hat die Auswahl in {{eventName}} abgeschlossen (Fotos: {{count}})",
+      "approval_submitted": "{{guestName}} hat die bearbeiteten Fotos in {{eventName}} freigegeben",
+      "selection_reopened": "Einreichung von {{guestName}} in {{eventName}} wieder geöffnet",
+      "photos_restored": "{{count}} Fotos aus dem Papierkorb von {{eventName}} wiederhergestellt",
+      "photos_trash_purged": "{{count}} Fotos endgültig aus dem Papierkorb von {{eventName}} gelöscht"
+    },
+    "customerActivity": {
+      "customer_invitation_created": "Einladung gesendet",
+      "customer_password_reset_requested": "Passwort-Reset angefordert",
+      "customer_event_access": "Hat eine Galerie geöffnet"
     },
     "people": {
       "title": "Personen in dieser Galerie",
@@ -5484,7 +5808,19 @@
     "expandSidebar": "Seitenleiste ausklappen",
     "collapseSidebar": "Seitenleiste einklappen",
     "backToMenu": "Zurück zum Menü",
-    "viewOnGithub": "PicPeak auf GitHub ansehen"
+    "viewOnGithub": "PicPeak auf GitHub ansehen",
+    "tags": {
+      "title": "Automatische Tags",
+      "subtitle": "Fotos nach ihrem Motiv taggen, damit Gäste die Galerie nach Szenen filtern können.",
+      "enable": "Fotos dieser Galerie automatisch taggen",
+      "enableHint": "Die Fotos werden im Hintergrund mit Tags aus einer festen Liste von Szenen versehen, etwa Zeremonie, Torte oder Tanzen. Tags beschreiben die Szene, nie die abgebildeten Personen. Gäste können nach den vorkommenden Tags filtern.",
+      "tagging": "Tagging läuft … {{tagged}} von {{total}} Fotos",
+      "status": "{{tagged}} / {{total}} Fotos getaggt",
+      "failed": "fehlgeschlagen: {{count}}",
+      "queued": "Zum Taggen eingereiht: {{count}}",
+      "rescan": "Tagging erneut ausführen",
+      "waitingHint": "Die Fotos bleiben eingereiht, bis der ML-Container mit dem Tagging-Modell erreichbar ist."
+    }
   },
   "acceptInvitation": {
     "title": "Einladung annehmen",
@@ -5715,7 +6051,8 @@
       "status": {
         "pending": "Ausstehend",
         "sent": "Gesendet",
-        "failed": "Fehlgeschlagen"
+        "failed": "Fehlgeschlagen",
+        "suppressed": "Unterdrückt"
       },
       "col": {
         "recipient": "Empfänger",
@@ -6085,7 +6422,11 @@
       "timeWindow": "Zeitfenster (Minuten)",
       "maxRequests": "Maximale Anfragen",
       "decisions": "Freigabe / Ablehnung pro Foto",
-      "decisionsDesc": "Gäste geben jedes Foto frei oder lehnen es ab, auf Wunsch mit Begründung. Du filterst und exportierst nach ihrer Entscheidung"
+      "decisionsDesc": "Gäste geben jedes Foto frei oder lehnen es ab, auf Wunsch mit Begründung. Du filterst und exportierst nach ihrer Entscheidung",
+      "selectionSubmit": "Auswahl abschließen",
+      "selectionSubmitDesc": "Gäste reichen ihre Likes oder Favoriten ein, wenn sie fertig sind. Ihre Auswahl ist dann gesperrt, bis du sie wieder öffnest, und du wirst benachrichtigt",
+      "annotations": "Zeichnen auf Fotos",
+      "annotationsDesc": "Gäste können auf ein Foto zeichnen und die Zeichnung an ihren Kommentar anhängen. Benötigt Kommentare"
     },
     "moderated": "Feedback moderiert",
     "deleted": "Feedback gelöscht",
@@ -6138,6 +6479,9 @@
     "rateStar_one": "{{count}} Stern bewerten",
     "rateStar_other": "{{count}} Sterne bewerten",
     "removeRating": "Bewertung entfernen",
+    "rateSelected": "Auswahl bewerten",
+    "bulkRatingPartial": "{{rated}} von {{total}} Fotos wurden bewertet",
+    "ratingLimitReached": "Bewertungslimit erreicht. Bitte versuchen Sie es später erneut.",
     "ratingsCount_one": "{{count}} Bewertungen",
     "ratingsCount_other": "{{count}} Bewertungen",
     "likeError": "Like konnte nicht aktualisiert werden",
@@ -6206,7 +6550,38 @@
     "youRejected": "Du hast dieses Foto abgelehnt",
     "deleteAction": "Feedback löschen",
     "panelTitle": "Feedback zum Foto",
-    "closePanel": "Feedback schließen"
+    "closePanel": "Feedback schließen",
+    "submissions": {
+      "title": "Abgeschlossene Auswahlen und Freigaben",
+      "selection": "Auswahl",
+      "approval": "Freigabe der bearbeiteten Fotos",
+      "photoCount": "Fotos: {{count}}",
+      "submittedOn": "Eingereicht am {{date}}",
+      "reopenedOn": "Wieder geöffnet am {{date}}",
+      "note": "Anmerkung: {{note}}",
+      "reopen": "Wieder öffnen",
+      "reopenConfirm": "Diese Einreichung wieder öffnen? Der Gast kann seine Auswahl wieder ändern und muss sie erneut einreichen.",
+      "reopened": "Einreichung wieder geöffnet",
+      "reopenError": "Einreichung konnte nicht wieder geöffnet werden"
+    },
+    "annotation": {
+      "draw": "Auf Foto zeichnen",
+      "edit": "Zeichnung bearbeiten",
+      "remove": "Zeichnung entfernen",
+      "attached": "Zeichnung angehängt",
+      "inProgress": "Schließe die Zeichnung auf dem Foto ab und sende dann deinen Kommentar.",
+      "show": "Zeichnung anzeigen",
+      "hide": "Zeichnung ausblenden",
+      "toolbar": "Zeichenwerkzeuge",
+      "toolFree": "Freihand",
+      "toolArrow": "Pfeil",
+      "color": "Farbe {{number}}",
+      "undo": "Rückgängig",
+      "clear": "Alles löschen",
+      "done": "Fertig",
+      "limitReached": "Eine Zeichnung kann höchstens {{max}} Striche enthalten.",
+      "overlayLabel": "Zeichnung auf dem Foto"
+    }
   },
   "filter": {
     "feedbackFilters": "Feedback-Filter",
@@ -6539,6 +6914,13 @@
       "locked": "Konto wegen zu vieler Versuche vorübergehend gesperrt. Versuchen Sie es später erneut.",
       "lockedRetry": "Konto vorübergehend gesperrt. Versuchen Sie es in {{seconds}} Sekunden erneut."
     },
+    "passkey": {
+      "signIn": "Mit Passkey anmelden",
+      "useInstead": "Stattdessen Passkey verwenden",
+      "cancelled": "Die Passkey-Abfrage wurde abgebrochen oder ist abgelaufen. Bitte erneut versuchen.",
+      "unsupported": "Dieser Browser oder dieses Gerät kann hier keinen Passkey verwenden.",
+      "failed": "Anmeldung mit Passkey fehlgeschlagen. Erneut versuchen oder mit Passwort anmelden."
+    },
     "ssoDivider": "oder",
     "ssoSignIn": "Mit SSO anmelden",
     "ssoOnlyHint": "Die Passwort-Anmeldung ist auf dieser Instanz deaktiviert — melden Sie sich über Ihren Identity Provider an.",
@@ -6637,7 +7019,17 @@
       "moveToFolderTitle_other": "{{count}} Fotos in einen Ordner verschieben",
       "photosMoved_one": "{{count}} Foto nach {{folder}} verschoben",
       "photosMoved_other": "{{count}} Fotos nach {{folder}} verschoben",
-      "moveFailed": "Die Fotos konnten nicht verschoben werden"
+      "moveFailed": "Die Fotos konnten nicht verschoben werden",
+      "errors": {
+        "exists": "Hier gibt es bereits einen Ordner mit diesem Namen.",
+        "deleteNameClash": "Der Unterordner «{{name}}» kann nicht eine Ebene höher: Dort gibt es bereits einen Ordner mit diesem Namen. Benennen Sie ihn zuerst um oder verschieben Sie ihn.",
+        "tooDeep": "Ordner lassen sich höchstens {{limit}} Ebenen tief verschachteln.",
+        "notFound": "Dieser Ordner existiert nicht mehr. Laden Sie die Seite neu.",
+        "cycle": "Ein Ordner kann nicht in sich selbst oder einen seiner Unterordner verschoben werden.",
+        "limitReached": "Diese Galerie hat die Höchstzahl von {{limit}} Ordnern erreicht.",
+        "requestLimitReached": "Diese Galerie hat die Höchstzahl von {{limit}} offenen Ordneranfragen erreicht. Bitten Sie eine Administratorin oder einen Administrator, zuerst einige zu genehmigen oder abzulehnen.",
+        "requestNotFound": "Über diese Ordneranfrage wurde bereits entschieden, oder sie existiert nicht mehr."
+      }
     },
     "folderRequests": {
       "title_one": "{{count}} Ordneranfrage",
@@ -6664,10 +7056,10 @@
       "waitingForAdmin_other": "{{count}} Ordneranfragen warten auf einen Admin. Bis dahin liegen die {{photos}} Fotos im nächstgelegenen vorhandenen Ordner."
     },
     "review": {
-      "pendingOwner_one": "{{count}} Upload aus Ihrem Team wartet auf Ihre Prüfung",
-      "pendingOwner_other": "{{count}} Uploads aus Ihrem Team warten auf Ihre Prüfung",
-      "pendingMember_one": "{{count}} Team-Upload wartet auf die Prüfung durch den Inhaber",
-      "pendingMember_other": "{{count}} Team-Uploads warten auf die Prüfung durch den Inhaber",
+      "pendingOwner_one": "{{count}} Upload wartet auf Ihre Prüfung",
+      "pendingOwner_other": "{{count}} Uploads warten auf Ihre Prüfung",
+      "pendingMember_one": "{{count}} Upload wartet auf die Prüfung durch den Inhaber",
+      "pendingMember_other": "{{count}} Uploads warten auf die Prüfung durch den Inhaber",
       "nonePending": "Keine Uploads warten auf Prüfung.",
       "filterPending": "Zu prüfen ({{count}})",
       "filterRejected": "Abgelehnt ({{count}})",
@@ -6682,6 +7074,8 @@
       "pendingBadge": "Zu prüfen",
       "rejectedBadge": "Abgelehnt",
       "uploadedBy": "Hochgeladen von {{name}}",
+      "sourceGuest": "Gast",
+      "sourceTeam": "Team",
       "hiddenUntilApproved": "Für Gäste und Kunden verborgen, bis es freigegeben ist",
       "skippedOnShow_one": "{{count}} Foto wartet auf Prüfung und bleibt verborgen, bis es freigegeben ist",
       "skippedOnShow_other": "{{count}} Fotos warten auf Prüfung und bleiben verborgen, bis sie freigegeben sind"
@@ -7071,7 +7465,9 @@
       "marketingOptOutHelp": "Wenn aktiv, wird dieser Kunde von jeder Newsletter-Kampagne übersprungen. E-Mails zu Galerien, Offerten und Rechnungen sind nicht betroffen.",
       "marketingOptOutSince": "Seit {{date}}",
       "dayRate": "Standard-Tagessatz",
-      "dayRateHint": "Für Angebotspositionen pro Tag. In {{currency}}. Leer lassen, um den Standard-Tagessatz aus Einstellungen → Buchhaltung zu verwenden."
+      "dayRateHint": "Für Angebotspositionen pro Tag. In {{currency}}. Leer lassen, um den Standard-Tagessatz aus Einstellungen → Buchhaltung zu verwenden.",
+      "noAdminEmails": "Keine administrativen E-Mails",
+      "noAdminEmailsHint": "Angebote, Verträge, Rechnungen und Mahnungen werden wie gewohnt erstellt, aber dieser Kunde erhält dazu keine E-Mail. Mit Portalzugang sieht er sie dort, sonst übergeben Sie sie selbst. Zurückgehaltene E-Mails erscheinen im E-Mail-Protokoll als „Unterdrückt“. Galerie-E-Mails sind nicht betroffen. Kopien an weitere Empfänger desselben Dokuments (z. B. eine Treuhänderin in CC) werden ebenfalls zurückgehalten. E-Mails, die beim Einschalten bereits in der Warteschlange sind, gehen noch raus."
     },
     "hours": {
       "section": "Stunden",
@@ -8482,7 +8878,14 @@
     "createdToast": "Entwurf erstellt.",
     "createDraft": "Entwurf erstellen",
     "unsavedSavedFirst": "Ihre ungespeicherten Änderungen werden zuerst gespeichert.",
-    "savedToastSent": "Angebot gespeichert."
+    "savedToastSent": "Angebot gespeichert.",
+    "issue": "Ausstellen",
+    "reissueNoMail": "Erneut ausstellen",
+    "issuedToast": "Angebot ausgestellt. Es wurde keine E-Mail gesendet.",
+    "saveAndIssueTitle": "Mit ungespeicherten Änderungen ausstellen?",
+    "saveAndIssueMessage": "Ihre Änderungen werden zuerst gespeichert, dann wird das Angebot ausgestellt. Dieser Kunde erhält keine E-Mail.",
+    "saveAndIssue": "Speichern & ausstellen",
+    "confirmIssue": "Dieses Angebot jetzt ausstellen? Dieser Kunde erhält keine E-Mail."
   },
   "crm": {
     "lineItems": {
@@ -8729,7 +9132,22 @@
     "forCustomer": "für {{name}}",
     "issuedLockedTitle": "Ausgestellte Rechnungen können nicht geändert werden.",
     "issuedLocked": "Zur Korrektur stornieren Sie sie mit einer Stornorechnung und stellen eine neue aus.",
-    "createDraft": "Rechnung erstellen"
+    "createDraft": "Rechnung erstellen",
+    "issue": "Ausstellen",
+    "issuedToast": "Rechnung ausgestellt. Es wurde keine E-Mail gesendet.",
+    "saveAndIssueTitle": "Mit ungespeicherten Änderungen ausstellen?",
+    "saveAndIssueMessage": "Ihre Änderungen werden zuerst gespeichert, dann wird die Rechnung ausgestellt. Dieser Kunde erhält keine E-Mail.",
+    "saveAndIssue": "Speichern & ausstellen",
+    "confirmIssue": "Diese Rechnung jetzt ausstellen? Dieser Kunde erhält keine E-Mail.",
+    "confirmReleaseIssue": "Fotos als geliefert markieren und diese Rechnung jetzt ausstellen? Dieser Kunde erhält keine E-Mail.",
+    "releaseForDeliveryIssue": "Geliefert & ausstellen",
+    "releasedIssuedToast": "Lieferrechnung ausgestellt. Es wurde keine E-Mail gesendet.",
+    "recordReminder": "Mahnung erfassen",
+    "confirmRecordReminder": "Jetzt eine Mahnung erfassen? Dieser Kunde erhält keine E-Mail, und es wird keine Mahngebühr berechnet.",
+    "reminderRecordedToast": "Mahnung erfasst; es wurde keine E-Mail gesendet.",
+    "confirmCancelIssuedNoMail": "Eine Stornorechnung wird erstellt; dieser Kunde erhält keine E-Mail. Das kann nicht rückgängig gemacht werden. Fortfahren?",
+    "cancelledWithStornoNoMailToast": "Rechnung storniert — Stornorechnung ausgestellt; es wurde keine E-Mail gesendet.",
+    "confirmReissueNoMail": "Für diese Rechnung wird eine Stornorechnung ausgestellt (dieser Kunde erhält keine E-Mail), und ein neuer geplanter Entwurf mit denselben Positionen wird erstellt. Die neue Rechnung verweist auf diese als „Ersetzt R-XXXX“. Fortfahren?"
   },
   "businessProfile": {
     "savedToast": "Geschäftsprofil gespeichert.",
@@ -9391,12 +9809,21 @@
         },
         "collectHint": "Nur die erste unterzeichnende Person erhält jetzt einen Link, um ihre Angaben zu ergänzen. Vertrag, PDF und Preis werden erst danach erstellt und gehen dann an die übrigen Unterzeichnenden.",
         "requestDetails": "Angaben anfordern",
-        "afterDetails": "Wird festgelegt, sobald die Kundschaft ihre Angaben ergänzt hat."
+        "afterDetails": "Wird festgelegt, sobald die Kundschaft ihre Angaben ergänzt hat.",
+        "issue": "Ausstellen",
+        "noMailNotice": "Dieser Kunde erhält keine administrativen E-Mails. Mit Portalzugang kann er ihn dort unterschreiben, sonst laden Sie die auf Papier unterschriebene Fassung hoch. Weitere Unterzeichner werden wie gewohnt per E-Mail eingeladen.",
+        "readyToIssue": "Alles ist bereit zum Ausstellen.",
+        "noMailAddressHint": "Dieser Kunde erhält keine administrativen E-Mails und kann daher nicht per E-Mail nach seinen Angaben gefragt werden. Tragen Sie die fehlende Adresse zuerst beim Kunden ein."
       },
       "saveAndSendTitle": "Mit ungespeicherten Änderungen senden?",
       "saveAndSendMessage": "Ihre Änderungen werden zuerst gespeichert, dann prüfen Sie den Vertrag, bevor er verschickt wird.",
       "saveAndReview": "Speichern & prüfen",
-      "cancelContract": "Vertrag stornieren"
+      "cancelContract": "Vertrag stornieren",
+      "issue": "Ausstellen",
+      "finishIssuing": "Mit den Kundendaten fertig ausstellen",
+      "issuedToast": "Vertrag ausgestellt. Der Kunde hat keine E-Mail erhalten; mit Portalzugang kann er ihn dort unterschreiben.",
+      "confirmResendSignedNoMail": "Den unterschriebenen Vertrag als PDF erneut senden? Er geht an Sie; dieser Kunde erhält keine E-Mail.",
+      "resentSignedNoMailToast": "Unterschriebener Vertrag erneut an Sie gesendet; dieser Kunde erhält keine E-Mail."
     },
     "editor": {
       "create": "Entwurf erstellen",
@@ -9827,7 +10254,8 @@
           "expired": "Frist zur Unterzeichnung abgelaufen",
           "reminded": "Erinnerung gesendet",
           "data_requested": "Angaben der Kundschaft angefordert",
-          "data_collected": "Angaben der Kundschaft eingegangen"
+          "data_collected": "Angaben der Kundschaft eingegangen",
+          "invited_portal": "Im Portal freigegeben (keine E-Mail)"
         },
         "actor": {
           "admin": "Admin",
@@ -9875,7 +10303,9 @@
       "remindError": "Die Erinnerung konnte nicht gesendet werden. Versuchen Sie es erneut.",
       "remindedAt": "{{count}}× erinnert, zuletzt {{date}}",
       "remindConfirm": "{{name}} eine Erinnerung senden? Sie enthält einen neuen Link; der bisherige funktioniert dann nicht mehr.",
-      "remind": "Erinnerung senden"
+      "remind": "Erinnerung senden",
+      "portalOpenAt": "Seit {{date}} im Portal freigegeben (keine E-Mail)",
+      "noAdminEmails": "Dieser Kunde erhält keine administrativen E-Mails, daher kann ihm kein Link gesendet werden. Er unterschreibt im Kundenportal oder auf Papier."
     },
     "paperUpload": {
       "title": "Unterschriebenen Vertrag hochladen",

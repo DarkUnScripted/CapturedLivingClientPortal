@@ -32,6 +32,7 @@ const crypto = require('crypto');
 const path = require('path');
 const multer = require('multer');
 const { assertContractPdfPath } = require('../utils/safePath');
+const { pipeStreamToResponse } = require('../utils/streamResponse');
 const { resolveStoredPath, toStoredPath } = require('../utils/storedPath');
 const { body, header, param, query } = require('express-validator');
 const { adminAuth } = require('../middleware/auth');
@@ -120,6 +121,9 @@ function transformContract(c, inclusions, textSections, attachmentRows) {
       lastName: c.customer_last_name,
       companyName: c.customer_company_name,
       preferredLanguage: c.customer_preferred_language,
+      // No administrative emails (migration 300): the send action becomes
+      // Issue — the document is issued (in the portal when the customer has access), no mail goes out.
+      noAdminEmails: c.customer_no_admin_emails === true || c.customer_no_admin_emails === 1,
     },
     status: c.status,
     // Migration 140 — cross-document lineage UUID. See adminQuotes
@@ -844,7 +848,9 @@ router.get(
       'Content-Disposition',
       `inline; filename="${data.contract.contract_number}.pdf"`,
     );
-    fs.createReadStream(safePath).pipe(res);
+    // existsSync above does not close the window: the read stream opens
+    // lazily, and a file removed in between errors outside handleAsync.
+    pipeStreamToResponse(fs.createReadStream(safePath), res, { context: `contract ${data.contract.id} PDF` });
   }),
 );
 
@@ -868,7 +874,7 @@ router.get(
       'Content-Disposition',
       `inline; filename="${data.contract.contract_number}-signed.pdf"`,
     );
-    fs.createReadStream(safePath).pipe(res);
+    pipeStreamToResponse(fs.createReadStream(safePath), res, { context: `contract ${data.contract.id} signed PDF` });
   }),
 );
 

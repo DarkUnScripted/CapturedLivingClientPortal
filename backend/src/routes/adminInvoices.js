@@ -119,6 +119,9 @@ function transformInvoice(i) {
       // identified by a null password_hash. We expose just the
       // boolean — the hash itself is dropped here.
       isPassive: i.customer_password_hash == null,
+      // No administrative emails (migration 300): the send action becomes
+      // Issue — the document is issued (in the portal when the customer has access), no mail goes out.
+      noAdminEmails: i.customer_no_admin_emails === true || i.customer_no_admin_emails === 1,
     },
     // Migration 140 — cross-document lineage UUID. See adminQuotes
     // transform for the rationale; lets the lineage card pull the
@@ -865,8 +868,11 @@ router.post(
     const proofInboundIds = Array.isArray(req.body.proofInboundIds)
       ? req.body.proofInboundIds.map((n) => parseInt(n, 10)).filter(Number.isInteger)
       : undefined;
-    await invoiceService.sendInvoice(parseInt(req.params.id, 10), req.admin.id, { proofInboundIds });
-    return successResponse(res, { sent: true });
+    // The admin's Send button is the one caller that may re-send an invoice
+    // that is already out (the "Resend" action).
+    const result = await invoiceService.sendInvoice(parseInt(req.params.id, 10), req.admin.id, { proofInboundIds, allowResend: true });
+    // A double click that waited for the first send reports that send, not one of its own.
+    return successResponse(res, { sent: !!result?.sent, alreadySent: !!result?.alreadySent });
   })
 );
 

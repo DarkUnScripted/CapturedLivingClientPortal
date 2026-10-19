@@ -843,9 +843,23 @@
     "hidePassword": "Hide password",
     "showPassword": "Show password",
     "loadFailed": "Could not load this",
-    "moreActions": "More actions"
+    "moreActions": "More actions",
+    "previousMonth": "Previous month",
+    "nextMonth": "Next month",
+    "today": "Today",
+    "chooseDate": "Choose date"
   },
   "upload": {
+    "duplicates": {
+      "title_one": "{{count}} file is already in this gallery",
+      "title_other": "{{count}} files are already in this gallery",
+      "toast_one": "{{count}} file is already in this gallery and was skipped — details in the upload bar at the top.",
+      "toast_other": "{{count}} files are already in this gallery and were skipped — details in the upload bar at the top.",
+      "badge": "Duplicate",
+      "sameAs": "same content as {{name}}",
+      "uploadAnyway": "Upload anyway",
+      "uploadAllAnyway": "Upload all anyway"
+    },
     "capacity": {
       "decoded": "This image exceeds the server's image-processing limits.",
       "imagePixels": "This image is larger than the {{max}} megapixels this server processes.",
@@ -886,6 +900,7 @@
     "processingProgress": "{{complete}} of {{total}} done",
     "processingFailed_one": "{{count}} photo failed to process",
     "processingFailed_other": "{{count}} photos failed to process",
+    "heldForReview": "Thank you! Your photos will appear in the gallery once the photographer has approved them.",
     "processingStillRunning": "Your upload is still being processed — it will appear in the gallery shortly.",
     "retryFailed": "Retry failed",
     "uploadComplete": "Upload complete!",
@@ -910,6 +925,7 @@
     "uploadMedia": "Upload Photos & Videos",
     "maxFilesReached": "Maximum {{limit}} files allowed",
     "someFilesSkipped": "Only {{allowed}} more files can be added (limit {{limit}})",
+    "filesOverLimit": "Added {{allowed}} of {{found}} files. One upload takes at most {{limit}} files; upload the rest separately.",
     "folderTooLarge": "The folder is too large to scan completely. Only part of it was added; drop sub-folders separately.",
     "tooManyFiles": "Maximum {{limit}} files can be uploaded at once",
     "limitInfo": "{{selected}} of {{limit}} files selected ({{remaining}} remaining)",
@@ -973,7 +989,11 @@
       "firstLookCallout_other": "First-look folder found: \"{{name}}\". Its {{count}} photos are badged \"First look\", and this gallery switches to two-stage delivery: guests see that more photos are on their way until you mark the full gallery as ready.",
       "firstLookSettings": "Due date and badge: this gallery’s Settings → Folders & delivery. Keywords: Settings → Events.",
       "nothingToUpload": "None of the selected files can be uploaded: they are all in hidden or skipped folders.",
-      "keptForNext": "Files added while the folders were prepared are still selected: {{count}}."
+      "keptForNext": "Files added while the folders were prepared are still selected: {{count}}.",
+      "overFolderLimit_one": "This upload would add {{adding}} folder, but the gallery already has {{current}} of at most {{limit}}. Turn off “Keep folder structure” or remove folders first.",
+      "overFolderLimit_other": "This upload would add {{adding}} folders, but the gallery already has {{current}} of at most {{limit}}. Turn off “Keep folder structure” or remove folders first.",
+      "overRequestLimit_one": "This upload would open {{adding}} folder request, but the gallery already has {{current}} of at most {{limit}} open. Ask an administrator to approve or reject some first, or turn off “Keep folder structure”.",
+      "overRequestLimit_other": "This upload would open {{adding}} folder requests, but the gallery already has {{current}} of at most {{limit}} open. Ask an administrator to approve or reject some first, or turn off “Keep folder structure”."
     },
     "largeFileReplaceSkipped": "Replace-by-name is not supported for files above the batch size; upload it without replace.",
     "removeFile": "Remove {{name}}"
@@ -1028,6 +1048,10 @@
     "addFiles": "Add files",
     "noUploadedFiles": "No uploaded files. Add files from your computer to include them in the download.",
     "sentTo": "Emailed to",
+    "emailHeld": "Email held until a photo is ready",
+    "heldHeading": "Email waits until a photo is ready",
+    "heldBadge": "Not sent yet",
+    "heldHint": "No photo in this transfer has finished processing yet. The email goes out on its own once one is ready.",
     "delivery": {
       "link": "Share a link",
       "email": "Send by email"
@@ -1353,8 +1377,13 @@
     "liked": "Liked",
     "favorited": "Favorited",
     "favorites": "Favorites",
+    "showLikedOnly": "Show only photos I liked",
+    "likedOnlyEmpty": "You have not liked any photos here yet. Tap the heart on a photo to find it here.",
+    "showAllPhotos": "Show all photos",
     "needHelp": "Need help? Contact us at",
     "noPhotosFound": "No photos found",
+    "noPhotosMatch": "No photos match your search or filters.",
+    "noPhotosYet": "There are no photos here yet.",
     "failedToLoad": "Failed to load photos",
     "tryAgain": "Try Again",
     "passwordChangeRequired": "Change your password in the admin area before previewing this gallery.",
@@ -1372,6 +1401,10 @@
     "cancelSelection": "Cancel Selection",
     "selectAll": "Select All",
     "deselectAll": "Deselect All",
+    "selectionTray": {
+      "title": "Selected ({{count}})",
+      "remove": "Remove {{name}} from the selection"
+    },
     "copyFilenames": {
       "button": "Copy filenames",
       "title": "Copy filenames",
@@ -1418,6 +1451,7 @@
     "expiresIn_other": "Gallery expires in {{count}} days",
     "downloading_one": "Downloading 1 photo...",
     "downloading_other": "Downloading {{count}} photos...",
+    "downloadingInParts": "Downloading {{count}} photos as {{parts}} ZIP files...",
     "guestRecovery": {
       "invalidEmail": "Enter a valid email address",
       "codeSent": "Check your inbox for a verification code.",
@@ -1483,6 +1517,10 @@
     "downloadNow": "Download",
     "downloadPrepFailed": "Preparation failed",
     "downloadPrepTimeout": "This is taking longer than expected. Please try again.",
+    "fullResolution": {
+      "loading": "Loading full resolution…",
+      "readout": "100% is the original size, pixel for pixel"
+    },
     "people": {
       "title": "People in this gallery",
       "showAll": "Show all {{count}}",
@@ -1523,6 +1561,9 @@
     "backToGallery": "All photos",
     "downloadFolder": "Download folder ({{count}})",
     "downloadFolderCapped": "Download first {{limit}} of {{total}}",
+    "downloadSelectionTooLarge": "You can download up to {{limit}} photos at once. Please select fewer.",
+    "newPhotos_one": "{{count}} new photo",
+    "newPhotos_other": "{{count}} new photos",
     "downloadEverything": "Download all photos",
     "downloadFolder_one": "Download folder ({{count}})",
     "downloadFolder_other": "Download folder ({{count}})",
@@ -1550,6 +1591,11 @@
       "uploadedBy": "Uploaded by {{name}}",
       "photoBy": "Photo by {{name}}"
     },
+    "filmStrip": {
+      "label": "Photos",
+      "photo": "Photo {{position}} of {{total}}",
+      "photoNamed": "Photo {{position}} of {{total}}: {{name}}"
+    },
     "firstLook": "First look",
     "viewAllPhotos": "All photos",
     "viewSwitch": "Show photos by",
@@ -1575,6 +1621,96 @@
     "preview": {
       "title": "Theme preview",
       "description": "This is how your galleries will look with the current theme settings."
+    },
+    "preparedDownload": "Your prepared download",
+    "downloadNotify": "Email me when it is ready",
+    "downloadNotifyRequested": "We will email you when the download is ready. You can close this window.",
+    "downloadNotifyFailed": "The email notification could not be set up. Please keep this window open.",
+    "downloadGone": "This download is no longer available. Please request it again.",
+    "selection": {
+      "counterCapped": "{{used}} of {{cap}} selected",
+      "counter": "{{used}} selected",
+      "finish": "Finish selection",
+      "finishTitle": "Finish your selection?",
+      "finishCount": "Selected photos: {{count}}",
+      "finishBody": "Your selection goes to the photographer. After that you can no longer change it; the photographer can reopen it for you.",
+      "finishSuccess": "Your selection was sent to the photographer",
+      "finishedOn": "Selection finished on {{date}}. Your picks are locked.",
+      "approve": "Approve edited photos",
+      "approveTitle": "Approve the edited photos?",
+      "approveBody": "You confirm that the edited photos are fine as they are and the photographer can go ahead. After that you can no longer change your approvals and rejections; the photographer can reopen them for you.",
+      "approveRejected": "Photos still marked as rejected: {{count}}",
+      "approveConfirm": "Approve",
+      "identityApproval": "your approval",
+      "identitySelection": "your selection",
+      "identityInvalid": "Please check your name and email. A name may use letters, digits, spaces, hyphens, apostrophes and dots.",
+      "approveSuccess": "Your approval was sent to the photographer",
+      "approvedOn": "Edited photos approved on {{date}}",
+      "noteLabel": "Note for the photographer (optional)",
+      "noteBlocked": "Your note contains words that are not allowed here.",
+      "nothingSelected": "Select at least one photo first",
+      "submitError": "Could not send it. Please try again.",
+      "lockedSelection": "Your selection is finished and can no longer be changed. Ask the photographer to reopen it.",
+      "lockedApproval": "You approved the edited photos, so your approvals and rejections can no longer be changed. Ask the photographer to reopen them."
+    },
+    "tags": {
+      "filterLabel": "Tags",
+      "matchAny": "Showing photos with any of the selected tags.",
+      "names": {
+        "ceremony": "Ceremony",
+        "couple": "Couple",
+        "portrait": "Portrait",
+        "group_photo": "Group photo",
+        "kiss": "Kiss",
+        "hug": "Hug",
+        "laughter": "Laughter",
+        "dancing": "Dancing",
+        "party": "Party",
+        "speech": "Speech",
+        "toast": "Toast",
+        "music": "Music",
+        "stage": "Stage",
+        "audience": "Audience",
+        "presentation": "Presentation",
+        "awards": "Awards",
+        "sports": "Sports",
+        "getting_ready": "Getting ready",
+        "dress": "Dress",
+        "rings": "Rings",
+        "bouquet": "Bouquet",
+        "flowers": "Flowers",
+        "cake": "Cake",
+        "food": "Food",
+        "drinks": "Drinks",
+        "table_setting": "Table setting",
+        "decoration": "Decoration",
+        "lights": "Candles & lights",
+        "gifts": "Gifts",
+        "confetti": "Confetti",
+        "fireworks": "Fireworks",
+        "details": "Details",
+        "venue": "Venue",
+        "indoor": "Indoors",
+        "outdoor": "Outdoors",
+        "landscape": "Landscape",
+        "beach": "Beach",
+        "sunset": "Sunset",
+        "night": "Night",
+        "vehicle": "Car",
+        "pets": "Pets",
+        "black_and_white": "Black & white"
+      }
+    },
+    "tile": {
+      "viewFullSize": "View full size",
+      "downloadPhoto": "Download photo",
+      "commentOnPhoto": "Comment on photo",
+      "likePhoto": "Like photo",
+      "unlikePhoto": "Unlike photo",
+      "comment": "Comment",
+      "like": "Like",
+      "unlike": "Unlike",
+      "selectPhoto": "Select {{name}}"
     }
   },
   "categories": {
@@ -1621,7 +1757,10 @@
   "events": {
     "revealMode": "Reveal mode (hide gallery until reveal)",
     "revealModeHelp": "Guests can upload but see no photos until you reveal the gallery — manually or at the scheduled time. Slideshow and client access keep working.",
+    "liveRefresh": "Live refresh (tell guests about new photos)",
+    "liveRefreshHelp": "An open gallery checks for new photos every 20 seconds and offers guests a \"new photos\" button. Nothing reloads on its own.",
     "revealAt": "Scheduled reveal (optional)",
+    "revealAtTime": "Reveal time",
     "revealAtHelp": "Leave empty to reveal manually with the \"Reveal now\" button.",
     "revealModeStatus": "Reveal mode",
     "revealed": "Revealed",
@@ -1673,6 +1812,7 @@
     "uploadPhotos": "Upload Photos",
     "archiveEvent": "Archive Gallery",
     "archiveConfirm": "Are you sure you want to archive this gallery? This action cannot be undone.",
+    "archiveInProgress": "This gallery is being archived right now. Try again once the archive has finished.",
     "extendExpiration": "Extend {{days}} Days",
     "backToEvents": "All galleries",
     "loadingEventDetails": "Loading event details...",
@@ -1798,22 +1938,29 @@
     "userUploads": "User Upload Settings",
     "allowUserUploads": "Allow guests to upload photos",
     "allowUserUploadsHelp": "Enable guests to upload their own photos to this gallery",
+    "moderateGuestUploads": "Approve guest uploads before they are published",
+    "moderateGuestUploadsHelp": "Guest uploads stay hidden from guests and clients until you or a reviewer approve them on the Photos tab. Rejected uploads stay hidden. Uploads that are waiting count towards the photo limit.",
     "allowUserUploadsDescription": "Enable guests to upload their own photos to this gallery",
     "uploadCategory": "Upload Category",
     "selectCategory": "Select a category for user uploads",
     "uploadCategoryHelp": "All user-uploaded photos will be added to this category",
+    "guestUploadMaxEdge": "Longest edge of guest photos (px)",
+    "guestUploadMaxEdgeHelp": "Larger JPEG, PNG and WebP photos are scaled down on the guest's device before upload, which saves data and storage. Leave empty to keep originals. Other formats and videos are always sent as they are.",
+    "guestUploadMaxEdgeInvalid": "The longest edge must be a whole number from 1024 to 16384, or empty.",
     "allowDownloads": "Allow photo downloads",
     "downloadsDisabled": "Downloads Disabled",
     "downloadProtection": "Download Protection",
     "disableRightClick": "Block right-click menu",
     "watermarkDownloads": "Add watermark to downloads",
+    "watermarkText": "Watermark text",
+    "watermarkTextHelp": "Replaces the company name in this gallery's text watermark. Leave empty to use the company name. Not shown when Branding has a watermark logo.",
     "enableDevtoolsProtection": "Detect developer tools",
     "useCanvasRendering": "Canvas rendering in the lightbox (advanced protection)",
     "protectionInfo": "Protection features help prevent unauthorized downloads but cannot block all methods.",
     "protectionLevelBasic": "Basic - Right-click blocking only",
     "protectionLevelStandard": "Standard - Keyboard shortcuts blocked",
     "protectionLevelEnhanced": "Enhanced - Print screen detection",
-    "protectionLevelMaximum": "Maximum - DevTools detection & canvas rendering",
+    "protectionLevelMaximum": "Maximum - DevTools detection, canvas rendering & full-size view capped at 1920×1080",
     "heroLogoSettings": "Hero Logo Settings",
     "heroLogoVisible": "Display logo in hero section",
     "heroLogoInherit": "Use branding default",
@@ -2105,6 +2252,9 @@
       "watchHelp": "New photos copied into the folder show up by themselves."
     },
     "externalSource": {
+      "missingFiles_one": "{{count}} file missing",
+      "missingFiles_other": "{{count}} files missing",
+      "missingFilesHint": "Show the photos whose file is gone from the folder",
       "alreadyRunning": "An import of this folder is already running.",
       "changeFolder": "Change folder",
       "importNow": "Import now",
@@ -2127,7 +2277,8 @@
       "structureApplied_one": "{{count}} photo moved into folders",
       "structureApplied_other": "{{count}} photos moved into folders",
       "structureNothing": "Every photo from a subfolder is in a folder already",
-      "structureFailed": "The folder structure could not be applied"
+      "structureFailed": "The folder structure could not be applied",
+      "structureLimited": "The gallery reached its folder limit: some photos went into the closest existing folder."
     },
     "header": {
       "moreActions": "More actions"
@@ -2160,7 +2311,8 @@
         "reminder": "The reminder email to the customer before the event.",
         "slideshow": "A fullscreen link for projectors at live events.",
         "source": "Where the photos of this gallery come from.",
-        "delivery": "Nested folders from uploads, and delivering a first look before the full gallery."
+        "delivery": "Nested folders from uploads, and delivering a first look before the full gallery.",
+        "tags": "Tag photos by scene so guests can filter the gallery."
       },
       "access": "Access",
       "appearance": "Appearance",
@@ -2231,6 +2383,7 @@
         "reminderOn": "goes out {{date}}",
         "uploaded": "Uploaded to PicPeak",
         "uploadsOff": "Uploads off",
+        "uploadsApproved": "approval required",
         "uploadsOn": "Uploads on",
         "watching": "watching",
         "watermarked": "watermarked",
@@ -2241,11 +2394,14 @@
         "firstLook": "first look, more to come",
         "teamMembers_one": "{{count}} team member",
         "teamMembers_other": "{{count}} team members",
-        "teamReview": "team uploads reviewed"
+        "teamReview": "team uploads reviewed",
+        "tags": "Tag photos by scene so guests can filter"
       },
       "undoSection": "Undo changes in this section",
       "delivery": "Folders & delivery",
-      "passwordOwnerOnly": "Only the gallery owner can change the password or turn it off."
+      "passwordOwnerOnly": "Only the gallery owner can change the password or turn it off.",
+      "recipientsOwnerOnly": "Only the gallery owner can change who receives the gallery email.",
+      "tags": "Tags"
     },
     "folders": {
       "sectionTitle": "Folders",
@@ -2334,7 +2490,31 @@
     "noEventsYet": "No galleries yet",
     "noEventsYetHint": "Create a gallery to share photos with a client.",
     "downloadLimitResetAction": "Reset downloads",
-    "notFoundHint": "It may have been deleted, or the link is wrong."
+    "notFoundHint": "It may have been deleted, or the link is wrong.",
+    "expiryPresets": {
+      "label": "Expiry quick picks",
+      "days": "{{days}} days",
+      "fromToday": "From today:"
+    },
+    "nextSteps": {
+      "title": "Before you share",
+      "progress": "{{done}} of {{total}} done",
+      "done": "Done",
+      "todo": "To do",
+      "photos": "Add photos",
+      "photosLink": "Open Photos",
+      "customer": "Add a customer email or account",
+      "customerLink": "Open Settings",
+      "publish": "Publish the gallery",
+      "publishLink": "Publish"
+    },
+    "showExifToGuests": "Show camera details to guests",
+    "showExifToGuestsHelp": "Camera, lens, focal length, aperture, shutter speed and ISO appear below the photo in the full-screen view. Location and serial numbers are never stored or shown.",
+    "welcomeEditor": {
+      "lineBreaksPreserved": "Line breaks will be preserved in emails",
+      "tip": "Tip: Press Enter to create a new line. Each line will appear as a separate paragraph in emails.",
+      "preview": "Preview:"
+    }
   },
   "settings": {
     "title": "System Settings",
@@ -2352,6 +2532,10 @@
       "maxVideoSizeHelp": "Separate per-file limit for video uploads, so photos can keep a smaller limit.",
       "videoWebRendition": "Browser-playable copies of videos",
       "videoWebRenditionHelp": "Re-encodes videos a browser cannot play (HEVC, QuickTime, MP4s that are not streamable) into an H.264 MP4 for playback. The original stays the download. Costs CPU per video and a second file; switching it on queues the videos already uploaded.",
+      "videoStripMetadata": "Strip location and device data from played videos",
+      "videoStripMetadataHelp": "Videos that already play in a browser get a copy without the recording location, camera and other metadata, made without re-encoding; guests play that copy. Stores one extra file per such video, about the size of the original. The original stays the download. Switching it off keeps the copies already made.",
+      "videoAdaptiveStreaming": "Adaptive video streaming",
+      "videoAdaptiveStreamingHelp": "Converts each video into a stream in up to three qualities (480p, 720p, 1080p), so playback starts quickly and adapts to the viewer’s connection. The original stays the download. Costs CPU per video and roughly as much storage again; videos longer than 30 minutes keep playing as before.",
       "maxFilesPerUpload": "Max Files per Upload",
       "maxFilesPerUploadHelp": "Maximum number of photos allowed in a single upload batch (1-{{max}}).",
       "maxUploadBatchSize": "Max Upload Batch Size (MB)",
@@ -2392,7 +2576,9 @@
       "adminLanguageHelp": "Applies to the admin area, for you on this device only. It takes effect immediately — no need to save.",
       "customerLanguage": "Gallery & guest language",
       "accountCreditName": "Photo credit",
-      "accountCreditNameHelp": "Credited on photos you upload when the file has no photographer name in its metadata. Leave empty for no credit."
+      "accountCreditNameHelp": "Credited on photos you upload when the file has no photographer name in its metadata. Leave empty for no credit.",
+      "photoTrashRetention": "Trash retention (days)",
+      "photoTrashRetentionHelp": "Photos deleted from a gallery stay in its trash this long and can be restored. 0 deletes photos at once. Photos in the trash still use storage."
     },
     "publicSite": {
       "badge": "Public Landing",
@@ -2627,7 +2813,6 @@
       "defaultProtection": "Default Protection Settings",
       "defaultProtectionHelp": "These settings apply to all new events. Individual events can override these defaults.",
       "protectionLevel": "Default Protection Level",
-      "imageQuality": "Default Image Quality",
       "enableDevtools": "Enable DevTools detection by default",
       "enableCanvas": "Enable canvas rendering in the lightbox by default (advanced protection)",
       "rateLimiting": "Rate Limiting",
@@ -2643,7 +2828,6 @@
       "logEvents": "Log security events to database",
       "infoTitle": "About Image Protection",
       "infoText": "These protection features help prevent casual downloading and copying but cannot block all methods. Determined users may still find ways to capture images. Consider using watermarks and legal agreements for comprehensive protection.",
-      "imageQualityHelp": "1-100, higher = better quality",
       "suspiciousActivityThresholdHelp": "Violations before flagging as suspicious",
       "autoBlockThresholdHelp": "Violations before auto-blocking IP"
     },
@@ -3108,6 +3292,11 @@
         "beta": "In development: ready for real work, but details may still change.",
         "experimental": "May break or be removed. Not for a production studio.",
         "roadmap": "Not built yet."
+      },
+      "autoTagging": {
+        "title": "Automatic tags",
+        "description": "Tag photos by scene (ceremony, cake, dancing, outdoors…) so guests can filter a gallery. Runs on your own server in the same optional ML container as face detection, with a tagging model added. Tags describe scenes, not people. Stays off until you also enable it per gallery.",
+        "lockedSingleContainer": "Not available on the all-in-one image. Tagging needs the separate ML container."
       }
     },
     "customerSurface": {
@@ -3239,6 +3428,53 @@
       "regenerateFailed": "Could not regenerate recovery codes. Check the code and try again.",
       "recoveryCodesRemaining_one": "{{count}} recovery code remaining."
     },
+    "passkeys": {
+      "title": "Passkeys",
+      "description": "Sign in with your fingerprint, face, device PIN or a security key instead of your password. A passkey also replaces the authenticator code.",
+      "domainNote": "Passkeys are tied to {{domain}}. If this site moves to another address they stop working, and you sign in with your password again.",
+      "empty": "No passkeys yet.",
+      "add": "Add a passkey",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. MacBook, YubiKey",
+      "nameRequired": "Give the passkey a name.",
+      "passwordLabel": "Current password",
+      "passwordHelp": "Confirms that it is you adding a new way to sign in.",
+      "passwordRequired": "Enter your current password.",
+      "codeLabel": "Authenticator code",
+      "codeHelp": "Your account uses two-factor authentication. Enter a code from your authenticator app, or a recovery code.",
+      "codeRequired": "Enter a code from your authenticator app.",
+      "continue": "Continue",
+      "added": "Passkey added.",
+      "addedOn": "Added {{date}}",
+      "lastUsed": "Last used {{date}}",
+      "neverUsed": "Never used",
+      "rename": "Rename",
+      "remove": "Remove",
+      "removeHelp": "Remove \"{{name}}\"? You will no longer be able to sign in with it.",
+      "removeConfirm": "Remove passkey",
+      "removed": "Passkey removed.",
+      "loadFailed": "Passkeys could not be loaded.",
+      "errors": {
+        "cancelled": "The passkey prompt was cancelled or timed out. Try again.",
+        "exists": "This passkey is already registered.",
+        "unsupported": "This browser or device cannot create a passkey.",
+        "security": "The browser refused to create a passkey for this address.",
+        "limit": "You have reached the maximum number of passkeys. Remove one to add another.",
+        "expired": "The request expired. Try again.",
+        "wrongPassword": "The current password is incorrect.",
+        "wrongCode": "The code is incorrect or has already been used.",
+        "failed": "Something went wrong. Try again."
+      },
+      "unavailable": {
+        "not_configured": "Passkeys need a public address for this site. Set the site URL below first.",
+        "ip_address": "Passkeys need a domain name. This site is set up with an IP address, so they cannot be used.",
+        "insecure_origin": "Passkeys need HTTPS. This site is set up without it, so they cannot be used.",
+        "origin_mismatch": "Passkeys only work on {{origin}}. Open the admin there to add or use one.",
+        "sso_only": "Password sign-in is switched off in favour of single sign-on, so passkeys are switched off too.",
+        "sso_account": "Your account signs in through single sign-on, so it cannot use passkeys.",
+        "unsupported": "This browser does not support passkeys."
+      }
+    },
     "sso": {
       "title": "Single Sign-On (OIDC)",
       "intro": "Let admins sign in through your identity provider (Keycloak, Authentik, Pocket ID, or any OIDC-compliant IdP). Local email/password login stays available as a fallback.",
@@ -3307,7 +3543,10 @@
       "eventIntro": "Override the site-wide download settings for this gallery only. \"Inherit\" follows Settings → Download resolutions.",
       "inheritWith": "Inherit ({{value}})",
       "effective": "Currently hands out: {{standard}}",
-      "pickerOn": "guests may choose another size"
+      "pickerOn": "guests may choose another size",
+      "retention": "Keep prepared downloads for (hours)",
+      "retentionHint": "How long a download prepared in a custom size stays available before it is deleted. Longer lets guests come back for it later, but each prepared download takes up about as much disk space as the photos in it. Applies to downloads prepared from now on.",
+      "retentionInvalid": "Enter a whole number of hours between {{min}} and {{max}}."
     },
     "captureDates": {
       "title": "Capture Dates",
@@ -3321,7 +3560,8 @@
       "skipped": "{{count}} photo(s) were changed by something else while the run was reading them and were not updated.",
       "description": "Backfill \"Date Taken\" from EXIF for photos imported before capture dates were read. External/reference imports never recorded one, so their galleries sort by import order instead of when the photos were taken.",
       "skipped_one": "{{count}} photo(s) were changed by something else while the run was reading them and were not updated.",
-      "skipped_other": "{{count}} photo(s) were changed by something else while the run was reading them and were not updated."
+      "skipped_other": "{{count}} photo(s) were changed by something else while the run was reading them and were not updated.",
+      "pendingDetails": "Photos waiting for this run: {{photos}}. It also reads the camera details (camera, lens, exposure) of photos that have none on record."
     },
     "orientationBackfill": {
       "title": "Photo Orientation",
@@ -3344,6 +3584,17 @@
       "running": "Reading credits...",
       "noneToRead": "No photos left to read",
       "button": "Read Credits from EXIF"
+    },
+    "placeholderBackfill": {
+      "title": "Tile Placeholders",
+      "description": "Compute the blurred placeholder a gallery tile shows while its thumbnail loads, for photos added before placeholders existed. Only the stored thumbnails are read, never the originals. New uploads get theirs automatically.",
+      "total": "Photos with a Thumbnail",
+      "withPlaceholder": "With a Placeholder",
+      "withoutPlaceholder": "Without a Placeholder",
+      "result": "Last run: {{success}} computed, {{failed}} thumbnails unreadable",
+      "running": "Computing placeholders...",
+      "noneToFill": "All photos already have a placeholder",
+      "button": "Compute Placeholders"
     },
     "saveBar": {
       "unsaved": "You have unsaved changes",
@@ -3774,6 +4025,12 @@
       "natural": "Natural (keep every aspect ratio)"
     },
     "storyGridModeHint": "Natural lays scenes out in rows from each photo's dimensions, so portrait photos are shown whole instead of cropped.",
+    "storyShowFilenames": "Show filenames on hover",
+    "storyShowFilenamesHint": "Shows the photo's filename when a guest hovers over it. A gallery set to show original filenames shows the uploaded name.",
+    "storyFooterTitle": "Footer title",
+    "storyFooterTitleHint": "Leave empty for \"Thank You\".",
+    "storyFooterText": "Footer text",
+    "storyFooterTextHint": "Plain text, up to {{max}} characters. Leave empty to show the welcome message, or the default thank-you line when there is none.",
     "typographyAndStyle": "Typography & Style",
     "bodyFont": "Body Font",
     "headingFont": "Heading Font",
@@ -4461,12 +4718,21 @@
       "apiPhotosDownloaded_other": "API token “{{token_name}}” downloaded {{count}} originals from {{eventName}}",
       "apiPhotosZipDownloaded": "API token “{{token_name}}” downloaded a ZIP of {{photo_count}} originals from {{eventName}}",
       "eventTeamChanged": "Team changed for {{eventName}}",
-      "photosReviewApproved_one": "{{count}} team upload approved in {{eventName}}",
-      "photosReviewApproved_other": "{{count}} team uploads approved in {{eventName}}",
-      "photosReviewRejected_one": "{{count}} team upload rejected in {{eventName}}",
-      "photosReviewRejected_other": "{{count}} team uploads rejected in {{eventName}}",
+      "photosReviewApproved_one": "{{count}} upload approved in {{eventName}}",
+      "photosReviewApproved_other": "{{count}} uploads approved in {{eventName}}",
+      "photosReviewRejected_one": "{{count}} upload rejected in {{eventName}}",
+      "photosReviewRejected_other": "{{count}} uploads rejected in {{eventName}}",
+      "guestUploadsPendingReview_one": "{{count}} guest upload is waiting for review in {{eventName}}",
+      "guestUploadsPendingReview_other": "{{count}} guest uploads are waiting for review in {{eventName}}",
       "photoDecision": "Photo approved or rejected in {{eventName}}",
-      "guestFeedbackDecision": "Guest approved or rejected a photo in {{eventName}}"
+      "guestFeedbackDecision": "Guest approved or rejected a photo in {{eventName}}",
+      "selectionSubmitted": "{{guestName}} finished their selection in {{eventName}} (photos: {{count}})",
+      "approvalSubmitted": "{{guestName}} approved the edited photos in {{eventName}}",
+      "selectionReopened": "Submission by {{guestName}} reopened in {{eventName}}",
+      "photosRestored_one": "{{count}} photo restored from the trash of \"{{eventName}}\"",
+      "photosRestored_other": "{{count}} photos restored from the trash of \"{{eventName}}\"",
+      "photosTrashPurged_one": "{{count}} photo deleted permanently from the trash of \"{{eventName}}\"",
+      "photosTrashPurged_other": "{{count}} photos deleted permanently from the trash of \"{{eventName}}\""
     },
     "notificationToasts": {
       "markedAllRead": "All notifications marked as read",
@@ -4503,6 +4769,8 @@
       "collages": "Collages",
       "noPosterFrame": "No poster frame",
       "noPosterFrameRetry": "Take the poster frame again",
+      "fileMissing": "File missing",
+      "fileMissingTooltip": "The file is no longer in the external folder. Guests do not see this photo; it comes back when the file does. Delete it if the file is gone for good.",
       "viewMode": "View mode",
       "gridView": "Grid view",
       "listView": "List view",
@@ -4560,7 +4828,53 @@
       "deleteManyConfirm_one": "Delete {{count}} photo? It is removed from the gallery. This cannot be undone.",
       "deleteManyConfirm_other": "Delete {{count}} photos? They are removed from the gallery. This cannot be undone.",
       "deleteManyAction_one": "Delete {{count}} photo",
-      "deleteManyAction_other": "Delete {{count}} photos"
+      "deleteManyAction_other": "Delete {{count}} photos",
+      "cameraDetails": "Camera details",
+      "trash": {
+        "title": "Trash",
+        "intro_one": "Deleted photos can be restored for {{count}} day. After that they are deleted for good.",
+        "intro_other": "Deleted photos can be restored for {{count}} days. After that they are deleted for good.",
+        "introOff": "Photos are now deleted at once. The ones listed here stay until their time is up.",
+        "empty": "The trash is empty",
+        "emptyHelp": "Photos deleted from this gallery are kept here before they are deleted for good.",
+        "loadFailed": "The trash could not be loaded",
+        "columnFile": "File",
+        "columnDeleted": "Deleted",
+        "columnDeletedBy": "Deleted by",
+        "columnRemaining": "Time left",
+        "columnSize": "Size",
+        "unknownUser": "Unknown",
+        "heldForReview": "Held for review",
+        "heldForReviewHelp": "This photo was waiting for review when it was deleted. Restored, it stays hidden until it is approved.",
+        "daysLeft_one": "{{count}} day left",
+        "daysLeft_other": "{{count}} days left",
+        "lastDay": "Less than a day left",
+        "restore": "Restore",
+        "restoreSelected": "Restore ({{count}})",
+        "purgeAction": "Delete permanently",
+        "purgeSelected": "Delete permanently ({{count}})",
+        "purgeOneLabel": "Delete \"{{name}}\" permanently",
+        "purgeConfirm_one": "Delete {{count}} photo permanently? This cannot be undone.",
+        "purgeConfirm_other": "Delete {{count}} photos permanently? This cannot be undone.",
+        "restored_one": "{{count}} photo restored",
+        "restored_other": "{{count}} photos restored",
+        "restoreFailed_one": "{{count}} photo could not be restored.",
+        "restoreFailed_other": "{{count}} photos could not be restored.",
+        "purged_one": "{{count}} photo deleted permanently",
+        "purged_other": "{{count}} photos deleted permanently",
+        "purgeFailed": "The photos could not be deleted permanently",
+        "forDays_one": "for {{count}} day",
+        "forDays_other": "for {{count}} days",
+        "confirmOne": "Delete \"{{name}}\"? The photo moves to the trash and can be restored {{forDays}}.",
+        "confirmMany_one": "Delete {{count}} photo? It moves to the trash and can be restored {{forDays}}.",
+        "confirmMany_other": "Delete {{count}} photos? They move to the trash and can be restored {{forDays}}.",
+        "moved_one": "{{count}} photo moved to the trash",
+        "moved_other": "{{count}} photos moved to the trash",
+        "deleted_one": "{{count}} photo deleted",
+        "deleted_other": "{{count}} photos deleted",
+        "deleteFailed_one": "{{count}} photo could not be deleted and is still in the gallery",
+        "deleteFailed_other": "{{count}} photos could not be deleted and are still in the gallery"
+      }
     },
     "events": {
       "tabs": {
@@ -4863,10 +5177,22 @@
       "photo_decision": "Photo approved or rejected in {{eventName}}",
       "guest_feedback_decision": "Guest approved or rejected a photo in {{eventName}}",
       "event_team_changed": "Team changed for {{eventName}}",
-      "photos_review_approved_one": "{{count}} team upload approved in {{eventName}}",
-      "photos_review_approved_other": "{{count}} team uploads approved in {{eventName}}",
-      "photos_review_rejected_one": "{{count}} team upload rejected in {{eventName}}",
-      "photos_review_rejected_other": "{{count}} team uploads rejected in {{eventName}}"
+      "photos_review_approved_one": "{{count}} upload approved in {{eventName}}",
+      "photos_review_approved_other": "{{count}} uploads approved in {{eventName}}",
+      "photos_review_rejected_one": "{{count}} upload rejected in {{eventName}}",
+      "photos_review_rejected_other": "{{count}} uploads rejected in {{eventName}}",
+      "guest_uploads_pending_review_one": "{{count}} guest upload is waiting for review in {{eventName}}",
+      "guest_uploads_pending_review_other": "{{count}} guest uploads are waiting for review in {{eventName}}",
+      "selection_submitted": "{{guestName}} finished their selection in {{eventName}} (photos: {{count}})",
+      "approval_submitted": "{{guestName}} approved the edited photos in {{eventName}}",
+      "selection_reopened": "Submission by {{guestName}} reopened in {{eventName}}",
+      "photos_restored": "{{count}} photos restored from the trash of {{eventName}}",
+      "photos_trash_purged": "{{count}} photos deleted permanently from the trash of {{eventName}}"
+    },
+    "customerActivity": {
+      "customer_invitation_created": "Invitation sent",
+      "customer_password_reset_requested": "Password reset requested",
+      "customer_event_access": "Opened a gallery"
     },
     "people": {
       "title": "People in this gallery",
@@ -4964,7 +5290,19 @@
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
     "backToMenu": "Back to menu",
-    "viewOnGithub": "View PicPeak on GitHub"
+    "viewOnGithub": "View PicPeak on GitHub",
+    "tags": {
+      "title": "Automatic tags",
+      "subtitle": "Tag photos by what they show, so guests can filter the gallery by scene.",
+      "enable": "Tag the photos of this gallery automatically",
+      "enableHint": "Photos are tagged in the background from a fixed list of scenes such as ceremony, cake or dancing. Tags describe the scene, never who is in it. Guests can filter by the tags that occur.",
+      "tagging": "Tagging… {{tagged}} of {{total}} photos",
+      "status": "{{tagged}} / {{total}} photos tagged",
+      "failed": "failed: {{count}}",
+      "queued": "Queued for tagging: {{count}}",
+      "rescan": "Re-run tagging",
+      "waitingHint": "Photos stay queued until the ML container with the tagging model is reachable."
+    }
   },
   "acceptInvitation": {
     "title": "Accept Invitation",
@@ -5172,7 +5510,8 @@
       "status": {
         "pending": "Pending",
         "sent": "Sent",
-        "failed": "Failed"
+        "failed": "Failed",
+        "suppressed": "Suppressed"
       },
       "col": {
         "recipient": "Recipient",
@@ -5612,7 +5951,8 @@
       "latestAttempt": "Latest attempt",
       "latestAttemptRunning": "Latest attempt running since",
       "latestAttemptFailed": "Latest attempt failed",
-      "lastSuccessfulBackup": "Last successful backup"
+      "lastSuccessfulBackup": "Last successful backup",
+      "signingKeyInvalid": "The backup signing key is unusable, so backups fail until it is fixed."
     },
     "actions": {
       "runBackupNow": "Run Backup Now",
@@ -5732,9 +6072,6 @@
         },
         "customCron": "Cron Expression",
         "customCronHelp": "Enter a valid cron expression (e.g., 0 3 * * *)",
-        "retention": "Retention Period",
-        "retentionDays": "Keep backups for",
-        "retentionHelp": "days (older backups will be automatically deleted)",
         "retentionCount": "Restore points to keep",
         "retentionCountHelp": "Complete restore points kept at a local or S3 destination. Older ones are deleted after each successful backup. 0 keeps all of them."
       },
@@ -6140,7 +6477,11 @@
       "timeWindow": "Time Window (minutes)",
       "maxRequests": "Max Requests",
       "decisions": "Approve / reject per photo",
-      "decisionsDesc": "Guests approve or reject each photo, optionally saying why. You filter and export by their decision"
+      "decisionsDesc": "Guests approve or reject each photo, optionally saying why. You filter and export by their decision",
+      "selectionSubmit": "Finish selection",
+      "selectionSubmitDesc": "Guests hand in their likes or favorites when they are done. Their picks are then locked until you reopen them, and you are notified",
+      "annotations": "Drawing on photos",
+      "annotationsDesc": "Guests can draw on a photo and attach the drawing to their comment. Needs comments"
     },
     "moderated": "Feedback moderated",
     "deleted": "Feedback deleted",
@@ -6193,6 +6534,9 @@
     "rateStar_one": "Rate {{count}} star",
     "rateStar_other": "Rate {{count}} stars",
     "removeRating": "Remove rating",
+    "rateSelected": "Rate selected",
+    "bulkRatingPartial": "{{rated}} of {{total}} photos were rated",
+    "ratingLimitReached": "Rating limit reached. Try again later.",
     "ratingsCount_one": "{{count}} ratings",
     "ratingsCount_other": "{{count}} ratings",
     "likeError": "Failed to update like",
@@ -6261,7 +6605,38 @@
     "youRejected": "You rejected this photo",
     "deleteAction": "Delete feedback",
     "panelTitle": "Photo feedback",
-    "closePanel": "Close feedback"
+    "closePanel": "Close feedback",
+    "submissions": {
+      "title": "Finished selections and approvals",
+      "selection": "Selection",
+      "approval": "Approval of the edited photos",
+      "photoCount": "Photos: {{count}}",
+      "submittedOn": "Submitted {{date}}",
+      "reopenedOn": "Reopened {{date}}",
+      "note": "Note: {{note}}",
+      "reopen": "Reopen",
+      "reopenConfirm": "Reopen this submission? The guest can change their picks again and has to submit them anew.",
+      "reopened": "Submission reopened",
+      "reopenError": "Failed to reopen the submission"
+    },
+    "annotation": {
+      "draw": "Draw on photo",
+      "edit": "Edit drawing",
+      "remove": "Remove drawing",
+      "attached": "Drawing attached",
+      "inProgress": "Finish the drawing on the photo, then send your comment.",
+      "show": "Show drawing",
+      "hide": "Hide drawing",
+      "toolbar": "Drawing tools",
+      "toolFree": "Freehand",
+      "toolArrow": "Arrow",
+      "color": "Colour {{number}}",
+      "undo": "Undo",
+      "clear": "Clear",
+      "done": "Done",
+      "limitReached": "A drawing can have up to {{max}} strokes.",
+      "overlayLabel": "Drawing on the photo"
+    }
   },
   "filter": {
     "feedbackFilters": "Feedback Filters",
@@ -6451,6 +6826,13 @@
       "sessionExpired": "Your verification session expired. Please sign in again.",
       "locked": "Account temporarily locked due to too many attempts. Try again later.",
       "lockedRetry": "Account temporarily locked. Try again in {{seconds}} seconds."
+    },
+    "passkey": {
+      "signIn": "Sign in with a passkey",
+      "useInstead": "Use a passkey instead",
+      "cancelled": "The passkey prompt was cancelled or timed out. Try again.",
+      "unsupported": "This browser or device cannot use a passkey here.",
+      "failed": "Passkey sign-in failed. Try again or sign in with your password."
     },
     "ssoDivider": "or",
     "ssoSignIn": "Sign in with SSO",
@@ -6672,7 +7054,17 @@
       "moveToFolderTitle_other": "Move {{count}} photos to a folder",
       "photosMoved_one": "{{count}} photo moved to {{folder}}",
       "photosMoved_other": "{{count}} photos moved to {{folder}}",
-      "moveFailed": "The photos could not be moved"
+      "moveFailed": "The photos could not be moved",
+      "errors": {
+        "exists": "A folder with this name already exists here.",
+        "deleteNameClash": "The subfolder \"{{name}}\" cannot move up: a folder with this name already exists there. Rename or move it first.",
+        "tooDeep": "Folders can be nested at most {{limit}} levels deep.",
+        "notFound": "This folder no longer exists. Reload the page.",
+        "cycle": "A folder cannot be moved into itself or one of its subfolders.",
+        "limitReached": "This gallery has reached its limit of {{limit}} folders.",
+        "requestLimitReached": "This gallery has reached its limit of {{limit}} open folder requests. Ask an administrator to approve or reject some first.",
+        "requestNotFound": "This folder request was already decided or no longer exists."
+      }
     },
     "folderRequests": {
       "title_one": "{{count}} folder request",
@@ -6699,10 +7091,10 @@
       "waitingForAdmin_other": "{{count}} folder requests are waiting for an admin. Until then their {{photos}} photos sit in the closest existing folder."
     },
     "review": {
-      "pendingOwner_one": "{{count}} upload from your team is waiting for your review",
-      "pendingOwner_other": "{{count}} uploads from your team are waiting for your review",
-      "pendingMember_one": "{{count}} team upload is waiting for the owner's review",
-      "pendingMember_other": "{{count}} team uploads are waiting for the owner's review",
+      "pendingOwner_one": "{{count}} upload is waiting for your review",
+      "pendingOwner_other": "{{count}} uploads are waiting for your review",
+      "pendingMember_one": "{{count}} upload is waiting for the owner's review",
+      "pendingMember_other": "{{count}} uploads are waiting for the owner's review",
       "nonePending": "No uploads are waiting for review.",
       "filterPending": "Pending review ({{count}})",
       "filterRejected": "Rejected ({{count}})",
@@ -6717,6 +7109,8 @@
       "pendingBadge": "Pending review",
       "rejectedBadge": "Rejected",
       "uploadedBy": "Uploaded by {{name}}",
+      "sourceGuest": "Guest",
+      "sourceTeam": "Team",
       "hiddenUntilApproved": "Hidden from guests and clients until approved",
       "skippedOnShow_one": "{{count}} photo waits for review and stays hidden until it is approved",
       "skippedOnShow_other": "{{count}} photos wait for review and stay hidden until they are approved"
@@ -7106,7 +7500,9 @@
       "marketingOptOutHelp": "When on, this customer is skipped by every newsletter campaign. Emails about their galleries, quotes and invoices are not affected.",
       "marketingOptOutSince": "Since {{date}}",
       "dayRate": "Default day rate",
-      "dayRateHint": "Used by per-day quote lines. Major units ({{currency}}). Leave blank to use the default day rate from Settings → Accounting."
+      "dayRateHint": "Used by per-day quote lines. Major units ({{currency}}). Leave blank to use the default day rate from Settings → Accounting.",
+      "noAdminEmails": "No administrative emails",
+      "noAdminEmailsHint": "Quotes, contracts, invoices and reminders are created as usual, but no email about them is sent to this customer. With portal access they see them there; otherwise you hand them over yourself. Held-back emails appear as “Suppressed” in the email log. Gallery emails are not affected. Copies to other recipients of the same document (e.g. an accountant in CC) are held back too. Emails already queued when you turn this on still go out."
     },
     "hours": {
       "section": "Hours",
@@ -8517,7 +8913,14 @@
     "createdToast": "Draft created.",
     "createDraft": "Create draft",
     "unsavedSavedFirst": "Your unsaved changes are saved first.",
-    "savedToastSent": "Quote saved."
+    "savedToastSent": "Quote saved.",
+    "issue": "Issue",
+    "reissueNoMail": "Issue again",
+    "issuedToast": "Quote issued. No email was sent.",
+    "saveAndIssueTitle": "Issue with your unsaved changes?",
+    "saveAndIssueMessage": "Your changes are saved first, then the quote is issued. This customer gets no email.",
+    "saveAndIssue": "Save & issue",
+    "confirmIssue": "Issue this quote now? This customer gets no email."
   },
   "crm": {
     "lineItems": {
@@ -8763,7 +9166,22 @@
     "forCustomer": "for {{name}}",
     "issuedLockedTitle": "Issued invoices can't be changed.",
     "issuedLocked": "To correct it, cancel it with a Storno invoice and issue a new one.",
-    "createDraft": "Create invoice"
+    "createDraft": "Create invoice",
+    "issue": "Issue",
+    "issuedToast": "Invoice issued. No email was sent.",
+    "saveAndIssueTitle": "Issue with your unsaved changes?",
+    "saveAndIssueMessage": "Your changes are saved first, then the invoice is issued. This customer gets no email.",
+    "saveAndIssue": "Save & issue",
+    "confirmIssue": "Issue this invoice now? This customer gets no email.",
+    "confirmReleaseIssue": "Mark the photos as delivered and issue this invoice now? This customer gets no email.",
+    "releaseForDeliveryIssue": "Mark delivered & issue",
+    "releasedIssuedToast": "Delivery invoice issued. No email was sent.",
+    "recordReminder": "Record reminder",
+    "confirmRecordReminder": "Record a reminder now? This customer gets no email, and no late fee is added.",
+    "reminderRecordedToast": "Reminder recorded; no email was sent.",
+    "confirmCancelIssuedNoMail": "A Stornorechnung will be generated; this customer gets no email. This cannot be undone. Continue?",
+    "cancelledWithStornoNoMailToast": "Invoice cancelled — Stornorechnung issued; no email was sent.",
+    "confirmReissueNoMail": "A Stornorechnung will be issued for this invoice (this customer gets no email), and a new scheduled draft will be created with the same line items. The new invoice will reference this one as \"Replaces R-XXXX\". Continue?"
   },
   "businessProfile": {
     "savedToast": "Business profile saved.",
@@ -9425,12 +9843,21 @@
         },
         "collectHint": "Only the first signer gets a link now, to complete their details. The contract, its PDF and the price are prepared once they have, and then go to the other signers.",
         "requestDetails": "Ask for the details",
-        "afterDetails": "Set once the customer has completed their details."
+        "afterDetails": "Set once the customer has completed their details.",
+        "issue": "Issue",
+        "noMailNotice": "This customer gets no administrative emails. With portal access they can sign it there; otherwise upload the paper-signed copy. Other signers are invited by email as usual.",
+        "readyToIssue": "Everything is ready to issue.",
+        "noMailAddressHint": "This customer gets no administrative emails, so they can't be asked for their details by email. Enter the missing address on the customer first."
       },
       "saveAndSendTitle": "Send with your unsaved changes?",
       "saveAndSendMessage": "Your changes are saved first, then you review the contract before it goes out.",
       "saveAndReview": "Save & review",
-      "cancelContract": "Cancel contract"
+      "cancelContract": "Cancel contract",
+      "issue": "Issue",
+      "finishIssuing": "Finish issuing with the customer's details",
+      "issuedToast": "Contract issued. No email was sent to the customer; with portal access they can sign it there.",
+      "confirmResendSignedNoMail": "Re-send the signed contract PDF? It goes to you; this customer gets no email.",
+      "resentSignedNoMailToast": "Signed contract re-sent to you; this customer gets no email."
     },
     "editor": {
       "create": "Create draft",
@@ -9861,7 +10288,8 @@
           "expired": "Time to sign ran out",
           "reminded": "Reminder sent",
           "data_requested": "Customer details requested",
-          "data_collected": "Customer details received"
+          "data_collected": "Customer details received",
+          "invited_portal": "Opened in the portal (no email)"
         },
         "actor": {
           "admin": "Admin",
@@ -9909,7 +10337,9 @@
       "remindError": "The reminder couldn't be sent. Try again.",
       "remindedAt": "Reminded {{count}}×, last {{date}}",
       "remindConfirm": "Send {{name}} a reminder? It carries a new link; the previous one stops working.",
-      "remind": "Send reminder"
+      "remind": "Send reminder",
+      "portalOpenAt": "Open in the portal since {{date}} (no email)",
+      "noAdminEmails": "This customer takes no administrative emails, so no link can be sent to them. They sign in the customer portal or on paper."
     },
     "paperUpload": {
       "title": "Upload a signed contract",

@@ -89,6 +89,10 @@ async function createFromQuote(quoteId, adminId, { contractTemplateId = null } =
   const hasContractSourceQuote = await hasColumnCached('contracts', 'source_quote_id');
   const hasQuoteContractBackPointer = await hasColumnCached('quotes', 'converted_contract_id');
   const hasContractEventCols = await hasColumnCached('contracts', 'event_name');
+  // The contract stays in the quote's project (migration 121), so the project
+  // page shows it without a second link, when the converter owns that project.
+  const carriedProject = await hasColumnCached('contracts', 'project_id')
+    ? await require('../projectService').carriedProjectId(quote.project_id, adminId) : null;
 
   // Resolve the actor BEFORE opening the transaction — adminActor reads
   // admin_users via the global db, which deadlocks the single-connection
@@ -116,6 +120,7 @@ async function createFromQuote(quoteId, adminId, { contractTemplateId = null } =
       updated_at: new Date(),
     };
     if (hasContractSourceQuote) contractRow.source_quote_id = quote.id;
+    if (carriedProject) contractRow.project_id = carriedProject;
     // Migration 140 — contract from quote inherits the quote's
     // deal_uuid so both documents belong to the same deal chain.
     // Falls back to a fresh UUID only if the source quote predates the
@@ -193,7 +198,9 @@ async function convertToEvent(contractId, adminId) {
   // the event row.
   if (contract.source_quote_id) {
     const quoteService = require('../quoteService');
-    const result = await quoteService.convertToEvent(contract.source_quote_id, adminId, { fromContract: true });
+    const result = await quoteService.convertToEvent(contract.source_quote_id, adminId, {
+      fromContract: true, projectId: contract.project_id || null,
+    });  // quoteService vets the project for adminId (carriedProjectId)
     if (hasContractConvertedEvent) {
       await auditedUpdate(db, 'contracts', { id: contractId }, {
         converted_event_id: result.eventId,
@@ -266,6 +273,9 @@ async function convertToEvent(contractId, adminId) {
     is_draft: true,
     created_by: adminId,
     quote_id: null,
+    // The gallery stays in the contract's project when the converter owns it
+    // (dropped below when the column is missing, like every other candidate key).
+    project_id: await require('../projectService').carriedProjectId(contract.project_id, adminId, { target: 'events' }),
     created_at: new Date(),
     updated_at: new Date(),
     // #1296 — a signed standalone contract converts straight to a gallery

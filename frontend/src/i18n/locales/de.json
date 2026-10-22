@@ -7999,7 +7999,6 @@
       "body": "Aktivieren Sie „Konten\" (oder eine andere CRM-Unterfunktion) unter Einstellungen → Funktionen, um loszulegen."
     },
     "subnav": {
-      "overview": "Übersicht",
       "accounts": "Konten",
       "quotes": "Angebote",
       "contracts": "Verträge",
@@ -8008,7 +8007,8 @@
       "bills": "Rechnungen",
       "taxReport": "Steuer",
       "development": "Entwicklung",
-      "newsletters": "Newsletter"
+      "newsletters": "Newsletter",
+      "projects": "Projekte"
     }
   },
   "accounting": {
@@ -8216,21 +8216,16 @@
     }
   },
   "projects": {
-    "title": "Projektübersicht",
+    "title": "Projekte",
     "subtitle": "Fasse Galerien zu Projekten zusammen und sieh jede E-Mail, jedes Dokument und jede Stunde in einem Cockpit.",
     "search": "Nach Name oder Kunde suchen…",
-    "empty": "Erstellen Sie oben eines, oder vorhandene Galerien wurden automatisch gruppiert.",
+    "empty": "Starten Sie eines mit „Neue Anfrage“, oder bestehende Galerien wurden automatisch gruppiert.",
     "notFound": "Projekt nicht gefunden",
     "noCustomer": "Kein einzelner Kunde",
     "rename": "Umbenennen",
     "timeline": "Meilensteine",
     "eventCount": "{{count}} Galerien",
     "totalHours": "{{hours}} erfasst",
-    "create": {
-      "label": "Name des neuen Projekts",
-      "placeholder": "z. B. Hochzeit Müller 2026",
-      "button": "Projekt erstellen"
-    },
     "col": {
       "name": "Projekt",
       "customer": "Kunde",
@@ -8245,14 +8240,16 @@
     },
     "value": {
       "label": "Projektwert",
-      "paid": "bezahlt"
+      "paid": "bezahlt",
+      "paidShare": "{{share}} % bezahlt · {{open}} offen",
+      "quoted": "Angeboten",
+      "total": "Wert",
+      "paidLabel": "Bezahlt"
     },
     "events": {
       "title": "Galerien",
       "none": "Diesem Projekt sind noch keine Galerien zugeordnet.",
-      "searchPlaceholder": "Galerie zuordnen — nach Name suchen…",
-      "attached": "Galerie zugeordnet",
-      "attachFailed": "Galerie konnte nicht zugeordnet werden"
+      "attachAfterCreateFailed": "Die Galerie wurde erstellt, konnte aber nicht dem Projekt zugeordnet werden. Ordnen Sie sie auf der Projektseite zu."
     },
     "feed": {
       "title": "Aktivität",
@@ -8276,26 +8273,241 @@
       "reRenderedTag": "≈ neu gerendert"
     },
     "toast": {
-      "created": "Projekt erstellt",
-      "createFailed": "Projekt konnte nicht erstellt werden",
       "saved": "Projekt gespeichert",
       "saveFailed": "Speichern fehlgeschlagen",
       "emailAction": "Erledigt",
       "emailActionFailed": "Aktion fehlgeschlagen",
-      "previewFailed": "Vorschau konnte nicht geladen werden"
+      "previewFailed": "Vorschau konnte nicht geladen werden",
+      "cancelled": "Projekt als abgesagt markiert.",
+      "completed": "Projekt abgeschlossen.",
+      "contractCreated": "Vertrag aus dem Angebot erstellt.",
+      "deleteFailed": "Das Projekt konnte nicht gelöscht werden",
+      "deleteNeedsPermission": "Dieses Projekt enthält {{records}}, die Sie nicht ändern dürfen. Deshalb können Sie es nicht löschen.",
+      "deleteForeignDocuments": "Dieses Projekt enthält Dokumente eines anderen Admins. Nehmen Sie diese zuerst aus dem Projekt.",
+      "deleteForeignGalleries": "Dieses Projekt enthält Galerien eines anderen Admins. Nehmen Sie diese zuerst aus dem Projekt.",
+      "deleted": "Projekt gelöscht. Seine Galerien und Dokumente bleiben erhalten.",
+      "galleryCreated": "Galerie als Entwurf erstellt.",
+      "renamed": "Projekt umbenannt",
+      "reopened": "Projekt wieder aufgenommen.",
+      "stepFailed": "Das hat nicht geklappt. Versuchen Sie es noch einmal.",
+      "stageSkipped": "Schritt übersprungen.",
+      "stageRestored": "Schritt wieder ins Projekt aufgenommen.",
+      "deleteChanged": "Inzwischen wurde etwas zum Projekt hinzugefügt. Prüfen Sie es und löschen Sie erneut."
     },
     "error": {
       "customerMismatch": "Das gehört zu einem anderen Kunden als dieses Projekt."
     },
     "status": {
       "active": "Aktiv",
-      "archived": "Archiviert"
+      "archived": "Archiviert",
+      "inquiry": "Anfrage",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgesagt"
     },
     "eventCount_one": "{{count}} Event",
     "eventCount_other": "{{count}} Events",
     "loadFailed": "Die Projekte konnten nicht geladen werden",
     "noMatches": "Keine Projekte passen zu dieser Suche",
-    "emptyTitle": "Noch keine Projekte"
+    "emptyTitle": "Noch keine Projekte",
+    "customer": {
+      "invite": "Ins Kundenportal einladen",
+      "inviteFailed": "Die Einladung konnte nicht gesendet werden",
+      "invited": "Einladung an {{email}} in die Warteschlange gestellt.",
+      "open": "Konto öffnen",
+      "title": "Kunde",
+      "hidden": "Kunden sind für Ihre Rolle nicht sichtbar."
+    },
+    "dashboard": {
+      "all": "Alle Projekte",
+      "byStage": "Nach Phase",
+      "empty": "Keine offenen Projekte. Eine neue Anfrage startet eines.",
+      "next": "Weiter: {{stage}}",
+      "noneAtStage": "Kein Projekt in dieser Phase.",
+      "title": "Projekte"
+    },
+    "data": {
+      "help": "Neue Angebote, Verträge und Galerien übernehmen diese Daten. Bereits erstellte Dokumente bleiben, wie sie sind.",
+      "notSaved": "nicht gespeichert",
+      "readOnly": "Sie können diese Daten sehen, aber nicht ändern.",
+      "title": "Projektdaten"
+    },
+    "delete": {
+      "button": "Projekt löschen",
+      "confirm": "„{{name}}“ löschen? Galerien, Angebote, Verträge und Rechnungen bleiben erhalten und verlieren nur die Zuordnung. Projektdaten und Notizen gehen verloren. Das kann nicht rückgängig gemacht werden.",
+      "title": "Projekt löschen?",
+      "records": {
+        "quotes_manage": "Angebote",
+        "contracts_manage": "Verträge",
+        "bills_manage": "Rechnungen",
+        "customers_edit": "Stunden",
+        "customers_documents_manage": "Kundendokumente"
+      }
+    },
+    "documents": {
+      "draft": "Entwurf",
+      "invoices": "Rechnungen",
+      "noContract": "Noch kein Vertrag.",
+      "noGallery": "Noch keine Galerie.",
+      "noInvoice": "Noch keine Rechnung.",
+      "noQuote": "Noch kein Angebot.",
+      "paidOn": "bezahlt am {{date}}",
+      "published": "Veröffentlicht",
+      "signedOn": "unterschrieben am {{date}}",
+      "title": "Dokumente & Galerien"
+    },
+    "field": {
+      "budget": "Budget",
+      "budgetHelp": "Komma oder Punkt, beides geht.",
+      "currency": "Währung",
+      "endBeforeStart": "Das Enddatum liegt vor dem Startdatum.",
+      "eventDate": "Datum von",
+      "eventEndDate": "bis",
+      "eventEndDateHelp": "Nur bei Anlässen über mehrere Tage.",
+      "eventType": "Anlass",
+      "eventTypeNone": "— Nicht festgelegt —",
+      "guestCount": "Gäste",
+      "location": "Ort",
+      "notes": "Notizen",
+      "source": "Woher kam die Anfrage?",
+      "sourceNone": "— Nicht festgelegt —",
+      "tooManyGuests": "Höchstens {{max}} Gäste."
+    },
+    "inquiry": {
+      "createFailed": "Die Anfrage konnte nicht gespeichert werden",
+      "created": "Anfrage gespeichert.",
+      "customerHelp": "Wer hat angefragt? Wählen Sie einen bestehenden Kunden oder legen Sie einen neuen an. Ein neuer Kunde bekommt keine E-Mail, bis Sie ihn einladen.",
+      "customerRequired": "Wählen Sie den Kunden aus oder legen Sie ihn an.",
+      "frameHelp": "Was Sie für das Angebot wissen müssen.",
+      "frameTitle": "Rahmen",
+      "nameHelp": "Vorschlag aus Anlass und Kunde. Erscheint nur im Admin, nie beim Kunden.",
+      "nameRequired": "Geben Sie dem Projekt einen Namen.",
+      "noCustomerPermission": "Sie können keine Kunden auswählen. Das Projekt wird ohne Kunde gespeichert; jemand mit Zugriff auf Kunden kann ihn später ergänzen.",
+      "occasionHelp": "Worum geht es, wann und wo?",
+      "occasionTitle": "Anlass",
+      "save": "Anfrage anlegen",
+      "subtitle": "Erfassen Sie, was der Kunde angefragt hat. Angebot, Vertrag, Galerie und Rechnung übernehmen diese Daten später.",
+      "title": "Neue Anfrage"
+    },
+    "loadOneFailed": "Das Projekt konnte nicht geladen werden.",
+    "menu": {
+      "attach": "Galerie zuordnen",
+      "more": "Weitere Aktionen"
+    },
+    "renameLabel": "Projektname",
+    "settings": {
+      "cancel": "Als abgesagt markieren",
+      "cancelHelp": "Kommt kein Auftrag zustande? Das Projekt verschwindet vom Dashboard, bleibt aber in der Projektliste unter „Abgesagt“. Rückgängig mit „Projekt wieder aufnehmen“.",
+      "cancelTitle": "Als abgesagt markieren",
+      "complete": "Abschliessen",
+      "completeHelp": "Für Projekte, bei denen nichts mehr offen ist, auch wenn eine Phase übersprungen wurde.",
+      "completeTitle": "Abschliessen",
+      "dangerHelp": "Galerien, Angebote, Verträge und Rechnungen bleiben erhalten und verlieren nur die Zuordnung zum Projekt.",
+      "dangerTitle": "Danger-Zone",
+      "deleteHelp": "Kann nicht rückgängig gemacht werden. Projektdaten und Notizen gehen verloren.",
+      "readOnly": "Sie können dieses Projekt sehen, aber nicht ändern.",
+      "reopen": "Projekt wieder aufnehmen",
+      "reopenCancelled": "Dieses Projekt ist abgesagt. Nehmen Sie es wieder auf, damit es erneut auf dem Dashboard erscheint.",
+      "reopenCompleted": "Dieses Projekt ist abgeschlossen. Nehmen Sie es wieder auf, um weiter daran zu arbeiten.",
+      "reopenTitle": "Projekt wieder aufnehmen",
+      "statusHelp": "Die Phase folgt Angebot, Vertrag und Rechnungen. Ändern Sie den Status nur von Hand, wenn kein Auftrag zustande kommt oder Sie früher abschliessen.",
+      "statusTitle": "Status"
+    },
+    "stage": {
+      "cancelledNote": "Dieses Projekt ist abgesagt. Nehmen Sie es in den Einstellungen wieder auf, um weiterzumachen.",
+      "completedNote": "Dieses Projekt ist abgeschlossen.",
+      "contract": "Vertrag",
+      "gallery": "Galerie",
+      "next": "Nächster Schritt",
+      "noStep": "Für Sie gibt es hier gerade nichts zu tun.",
+      "orJump": "Oder direkt:",
+      "position": "Phase {{n}} von {{total}}",
+      "quote": "Angebot",
+      "title": "Ablauf",
+      "inquiry": "Anfrage",
+      "invoice": "Rechnung",
+      "done": "Abschluss",
+      "skip": "Diesen Schritt überspringen",
+      "restore": "rückgängig",
+      "restoreAria": "{{stage}} wieder ins Projekt aufnehmen"
+    },
+    "step": {
+      "complete": "Projekt abschliessen",
+      "createContract": "Vertrag erstellen",
+      "createGallery": "Galerie anlegen",
+      "createInvoice": "Rechnung erstellen",
+      "createQuote": "Angebot erstellen",
+      "openContract": "Vertrag öffnen",
+      "openGallery": "Galerie öffnen",
+      "openInvoice": "Rechnung öffnen",
+      "openQuote": "Angebot öffnen"
+    },
+    "stepHint": {
+      "complete": "Alle Schritte sind erledigt oder übersprungen. Schliessen Sie das Projekt ab, damit es vom Dashboard verschwindet.",
+      "convertContract": "Die Galerie entsteht aus dem unterschriebenen Vertrag, mit seinem Zahlungsplan.",
+      "convertQuote": "Die Galerie entsteht aus dem angenommenen Angebot, mit seinem Zahlungsplan.",
+      "createContract": "Der Vertrag entsteht aus dem angenommenen Angebot und bleibt in diesem Projekt.",
+      "createGallery": "Name, Anlass, Datum und Kunde werden in die neue Galerie übernommen.",
+      "createInvoice": "Die Rechnung geht an den Kunden dieses Projekts und bleibt in diesem Projekt.",
+      "createQuote": "Kunde, Anlass, Datum und die Projektzuordnung werden ins Angebot übernommen.",
+      "openContract": "Der Vertrag wartet auf die Unterschriften.",
+      "openGallery": "Laden Sie die Fotos hoch und veröffentlichen Sie die Galerie.",
+      "openInvoice": "Eine Rechnung ist noch offen.",
+      "openQuote": "Das Angebot wartet darauf, gesendet oder angenommen zu werden."
+    },
+    "tabs": {
+      "activity": "Aktivität",
+      "overview": "Übersicht",
+      "settings": "Einstellungen"
+    },
+    "stageState": {
+      "done": "erledigt",
+      "current": "jetzt",
+      "skipped": "übersprungen",
+      "todo": "offen",
+      "hidden": "für Sie nicht sichtbar",
+      "cancelled": "abgesagt"
+    },
+    "source": {
+      "referral": "Empfehlung",
+      "website": "Website",
+      "social": "Social Media",
+      "returning": "Stammkunde",
+      "fair": "Messe oder Event",
+      "other": "Andere"
+    },
+    "flow": {
+      "title": "Projektablauf",
+      "label": "Projektablauf",
+      "full": "Mit Vertrag",
+      "no_contract": "Ohne Vertrag",
+      "no_quote": "Ohne Angebot",
+      "help": "Schritte, die der Ablauf nicht vorsieht, erscheinen als übersprungen. Einzelne Schritte lassen sich auch auf der Projektseite überspringen.",
+      "sectionHelp": "Welche Schritte dieser Auftrag hat. Sie können das später ändern."
+    },
+    "attach": {
+      "add": "Vorhandenes hinzufügen",
+      "quoteTitle": "Angebot hinzufügen",
+      "contractTitle": "Vertrag hinzufügen",
+      "galleryTitle": "Galerie hinzufügen",
+      "help": "Nach Nummer oder Name suchen. Verknüpfte Dokumente kommen mit.",
+      "helpCustomer": "Dokumente dieses Kunden. Suchen Sie, um andere zu finden.",
+      "search": "Suchen…",
+      "elsewhere": "in einem anderen Projekt, wird hierher verschoben",
+      "none": "Nichts gefunden.",
+      "done": "Zum Projekt hinzugefügt",
+      "failed": "Konnte nicht zum Projekt hinzugefügt werden",
+      "invoiceTitle": "Rechnung hinzufügen",
+      "galleryElsewhere": "Die Galerie dazu gehört zu einem anderen Projekt. Fügen Sie sie dort hinzu oder verschieben Sie zuerst die Galerie.",
+      "locked": "in einem anderen Projekt",
+      "invoiceElsewhere": "Diese Rechnung gehört bereits zu einem anderen Projekt.",
+      "helpGallery": "Die neusten Galerien. Suchen Sie nach Namen, um andere zu finden.",
+      "dealElsewhere": "Das Angebot, der Vertrag oder eine andere Rechnung desselben Auftrags gehört zu einem anderen Projekt.",
+      "collected": "Eine Sammelrechnung umfasst mehrere Aufträge und kann deshalb nicht zu einem Projekt gehören.",
+      "takenOut": "Aus dem Projekt genommen",
+      "takeOutFailed": "Konnte nicht aus dem Projekt genommen werden",
+      "takeOut": "Aus dem Projekt nehmen",
+      "takeOutNamed": "{{number}} aus dem Projekt nehmen"
+    }
   },
   "calendar": {
     "pageTitle": "Kalender",

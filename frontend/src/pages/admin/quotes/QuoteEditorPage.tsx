@@ -41,6 +41,7 @@ import { vatCodesService } from '../../../services/vatCodes.service';
 import { eventTypesService } from '../../../services/eventTypes.service';
 import { workflowsService } from '../../../services/workflows.service';
 import { useFeatureFlags } from '../../../contexts/FeatureFlagsContext';
+import { useProjectPrefill } from '../projects/useProjectPrefill';
 import { InstallmentsPanel } from '../../../components/admin/InstallmentsPanel';
 import { customerAdminService } from '../../../services/customerAdmin.service';
 import { userManagementService } from '../../../services/userManagement.service';
@@ -280,6 +281,24 @@ export const QuoteForm = forwardRef<QuoteFormHandle, QuoteFormProps>(({ quoteId,
       }
     })();
   }, [isEdit, searchParams]);
+
+  // Opened from a project's "Create quote" (`?projectId=`): the quote joins
+  // the project and starts from its occasion, name and date. The customer
+  // comes through `?customerAccountId=` above.
+  // The link itself is taken from the URL at once, so a quote saved before the
+  // project has loaded still joins it, and dropped if the project cannot load.
+  const prefillProjectId = useProjectPrefill((project) => setForm((prev) => ({
+    ...prev,
+    eventName: prev.eventName || project.name,
+    eventDate: prev.eventDate || project.eventDate || '',
+    eventType: prev.eventType || project.eventType || '',
+  })), {
+    enabled: !isEdit,
+    onError: (failedId) => setForm((prev) => (prev.projectId === failedId ? { ...prev, projectId: null } : prev)),
+  });
+  useEffect(() => {
+    if (prefillProjectId) setForm((prev) => (prev.projectId ? prev : { ...prev, projectId: prefillProjectId }));
+  }, [prefillProjectId]);
 
   // Seed the VAT from the configured default OUTPUT code (Settings →
   // Accounting) on a brand-new, blank quote — so quotes (and the invoices they

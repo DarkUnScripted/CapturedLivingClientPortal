@@ -7279,7 +7279,6 @@
       "body": "Za začetek omogočite Račune (ali drugo podfunkcijo Stranke) v Nastavitve → Funkcije."
     },
     "subnav": {
-      "overview": "Pregled",
       "accounts": "Računi",
       "quotes": "Ponudbe",
       "contracts": "Pogodbe",
@@ -7288,7 +7287,8 @@
       "bills": "Računi",
       "taxReport": "Davek",
       "development": "Razvoj",
-      "newsletters": "E-novice"
+      "newsletters": "E-novice",
+      "projects": "Projekti"
     }
   },
   "accounting": {
@@ -7492,21 +7492,15 @@
     }
   },
   "projects": {
-    "title": "Pregled projektov",
+    "title": "Projekti",
     "subtitle": "Združite dogodke v projekte in si v enem nadzornem središču oglejte vso e-pošto, dokumente, galerije in ure.",
     "search": "Išči po imenu ali stranki…",
-    "empty": "Projektov še ni. Ustvarite ga zgoraj ali pa so bili obstoječi dogodki že samodejno združeni.",
     "notFound": "Projekt ni najden",
     "noCustomer": "Brez ene določene stranke",
     "rename": "Preimenuj",
     "timeline": "Mejniki",
     "eventCount": "{{count}} dogodkov",
     "totalHours": "Zabeleženo: {{hours}}",
-    "create": {
-      "label": "Ime novega projekta",
-      "placeholder": "npr. Poroka Müller 2026",
-      "button": "Ustvari projekt"
-    },
     "col": {
       "name": "Projekt",
       "customer": "Stranka",
@@ -7525,10 +7519,7 @@
     },
     "events": {
       "title": "Dogodki",
-      "none": "Pod tem projektom še ni združenih dogodkov.",
-      "searchPlaceholder": "Pripni dogodek — išči po imenu…",
-      "attached": "Dogodek pripet",
-      "attachFailed": "Dogodka ni bilo mogoče pripeti"
+      "none": "Pod tem projektom še ni združenih dogodkov."
     },
     "feed": {
       "title": "Dejavnost",
@@ -7552,8 +7543,6 @@
       "reRenderedTag": "≈ ponovno izrisano"
     },
     "toast": {
-      "created": "Projekt ustvarjen",
-      "createFailed": "Projekta ni bilo mogoče ustvariti",
       "saved": "Projekt shranjen",
       "saveFailed": "Shranjevanje ni uspelo",
       "emailAction": "Končano",

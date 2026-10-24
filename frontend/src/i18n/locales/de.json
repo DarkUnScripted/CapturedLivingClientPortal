@@ -5359,6 +5359,12 @@
         "likes": "Likes",
         "credit": "Urheber"
       },
+      "visibility": {
+        "none": "Keine Fotos entsprechen der ausgewählten Sichtbarkeit und den Filtern.",
+        "filterLabel": "Foto-Sichtbarkeit",
+        "visible": "Sichtbare Fotos",
+        "hidden": "Ausgeblendete Fotos"
+      },
       "sort": {
         "label": "Fotos sortieren",
         "engagement": "Nach Interaktionen sortieren",

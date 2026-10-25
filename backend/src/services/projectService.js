@@ -880,6 +880,39 @@ async function dealProjectElsewhere(dealUuid, projectId, conn = db) {
 }
 
 /**
+ * For the add window: whether attaching quote or contract `doc` to project
+ * `projectId` takes anything out of another project. linkDealToProject moves
+ * the whole deal, so this is the document itself or any record of its deal
+ * (dealProjectElsewhere), including an invoice tied to another project.
+ */
+async function documentAttachMoves(doc, projectId, dealCache = null) {
+  if (doc.project_id != null && Number(doc.project_id) !== Number(projectId)) return true;
+  if (!doc.deal_uuid) return false;
+  if (dealCache?.has(doc.deal_uuid)) return dealCache.get(doc.deal_uuid);
+  const elsewhere = !!(await dealProjectElsewhere(doc.deal_uuid, projectId));
+  dealCache?.set(doc.deal_uuid, elsewhere);
+  return elsewhere;
+}
+
+/**
+ * documentAttachMoves for each listed quote or contract (GET /quotes or
+ * /contracts ?attachTo=), or null when the projects feature is off or the
+ * caller may not work on that project: the rule reads other projects
+ * unscoped.
+ */
+async function attachMovesFor(admin, rows, projectId) {
+  if (!projectId) return null;
+  const { isFeatureEnabled } = require('../middleware/requireFeatureFlag');
+  const { ownsProject } = require('../middleware/ownership');
+  if (!(await isFeatureEnabled('projects')) || !(await ownsProject(admin, projectId))) return null;
+  // A deal's lineage is read once, however many listed rows share it.
+  const dealCache = new Map();
+  const moves = [];
+  for (const row of rows) moves.push(await documentAttachMoves(row, projectId, dealCache));
+  return moves;
+}
+
+/**
  * Why invoice `inv` may not join project `projectId`, or null when it may.
  * One rule for the attach (before and inside its transaction) and for the
  * add window (GET /invoices?attachTo=), so the window never offers what the
@@ -1520,6 +1553,8 @@ module.exports = {
   assignInvoice,
   unassignInvoice,
   invoiceAttachRefusal,
+  documentAttachMoves,
+  attachMovesFor,
   dealProjectElsewhere,
   linkDealToProject,
   computeValuation,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { radioGroupKeyDown } from '../../utils/ariaKeyboard';
 import { Check, ClipboardCheck, Download, Trash2, Eye, EyeOff, Heart, Package, MessageSquare, Star, Video, FolderOpen, FolderInput, Cog, AlertTriangle, RefreshCw, FileX, LayoutGrid, List, UserRound, X, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { COLOR_LABEL_SWATCHES, type ColorLabel } from '../../services/feedback.service';
@@ -38,6 +38,8 @@ interface AdminPhotoGridProps {
   eventId: number;
   onPhotoClick: (photo: AdminPhoto, index: number) => void;
   onPhotosDeleted: () => void;
+  /** When provided, the parent owns the selection shared with other actions. */
+  selectedPhotoIds?: number[];
   onSelectionChange?: (selectedIds: number[]) => void;
   categories?: CategoryOption[];
   /** The event's folders (issue 1786); "Move to folder" is offered when there are any. */
@@ -61,6 +63,7 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
   eventId,
   onPhotoClick,
   onPhotosDeleted,
+  selectedPhotoIds,
   onSelectionChange,
   categories = [],
   folders = [],
@@ -76,7 +79,15 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
   const queryClient = useQueryClient();
   // The same test the tiles below use to tell a video from a photo.
   const videoCount = photos.filter(isVideoItem).length;
-  const [selectedPhotos, setSelectedPhotos] = useState<Set<number>>(new Set());
+  const [localSelectedPhotos, setLocalSelectedPhotos] = useState<Set<number>>(new Set());
+  const selectedPhotos = useMemo(
+    () => selectedPhotoIds === undefined ? localSelectedPhotos : new Set(selectedPhotoIds),
+    [selectedPhotoIds, localSelectedPhotos],
+  );
+  const setSelectedPhotos = (next: Set<number>) => {
+    if (selectedPhotoIds === undefined) setLocalSelectedPhotos(next);
+    onSelectionChange?.(Array.from(next));
+  };
   // Where a shift-click measures its range from: the last tile clicked without
   // the shift key (#1212). The index is what a range needs — a span of the
   // current ordering — but the id is carried with it so the anchor can prove
@@ -222,7 +233,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
         if (photo) newSelected.add(photo.id);
       }
       setSelectedPhotos(newSelected);
-      onSelectionChange?.(Array.from(newSelected));
       // Anchor deliberately left where it was, so a second shift-click
       // re-aims the same range from the original point rather than walking
       // the anchor along behind the cursor.
@@ -236,7 +246,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
     }
     if (index !== undefined) setAnchor({ index, photoId });
     setSelectedPhotos(newSelected);
-    onSelectionChange?.(Array.from(newSelected));
   };
 
   const handleSelectAll = () => {
@@ -252,7 +261,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       newSelected = new Set(photos.map(p => p.id));
     }
     setSelectedPhotos(newSelected);
-    onSelectionChange?.(Array.from(newSelected));
   };
 
   const handleDeleteSingle = async (photo: AdminPhoto, e: React.MouseEvent) => {
@@ -310,7 +318,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       setSelectedPhotos(new Set());
       setAnchor(null);
       setIsSelectionMode(false);
-      onSelectionChange?.([]);
       onPhotosDeleted();
     } catch {
       toast.error('Failed to delete photos');
@@ -335,7 +342,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
     if (isSelectionMode) {
       setSelectedPhotos(new Set());
       setAnchor(null);
-      onSelectionChange?.([]);
     }
   };
 
@@ -359,7 +365,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       setSelectedPhotos(new Set());
       setAnchor(null);
       setIsSelectionMode(false);
-      onSelectionChange?.([]);
       setIsCategoryModalOpen(false);
       onPhotosDeleted(); // Refresh the photo list
     } catch {
@@ -384,7 +389,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       setSelectedPhotos(new Set());
       setAnchor(null);
       setIsSelectionMode(false);
-      onSelectionChange?.([]);
       setIsFolderModalOpen(false);
       invalidateFolderViews(queryClient, eventId);
       onPhotosDeleted(); // Refresh the photo list
@@ -414,7 +418,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       setSelectedPhotos(new Set());
       setAnchor(null);
       setIsSelectionMode(false);
-      onSelectionChange?.([]);
       queryClient.invalidateQueries({ queryKey: ['admin-event-photos'] });
       onPhotosDeleted(); // Refresh the photo list
     } catch (error: unknown) {

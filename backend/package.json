@@ -1,6 +1,6 @@
 {
   "name": "picpeak-backend",
-  "version": "3.169.0-beta.0",
+  "version": "3.180.4-beta.0",
   "description": "Backend for PicPeak event photo sharing platform",
   "main": "server.js",
   "engines": {
@@ -22,6 +22,7 @@
     "@aws-sdk/client-s3": "^3.850.0",
     "@aws-sdk/lib-storage": "^3.850.0",
     "@aws-sdk/s3-request-presigner": "^3.850.0",
+    "@simplewebauthn/server": "^14.0.3",
     "ajv": "^8.20.0",
     "archiver": "^5.3.1",
     "axios": "1.20.0",
@@ -51,10 +52,10 @@
     "knex": "^2.4.2",
     "mailparser": "^3.9.9",
     "mime-types": "^3.0.1",
-    "multer": "2.4.0",
+    "multer": "2.5.0",
     "node-cron": "^3.0.2",
     "node-stream-zip": "^1.15.0",
-    "nodemailer": "^10.0.12",
+    "nodemailer": "^10.1.4",
     "openid-client": "^5.7.1",
     "otplib": "^12.0.1",
     "p-limit": "^3.1.0",
@@ -64,7 +65,7 @@
     "postcss": "8.5.23",
     "qrcode": "^1.5.4",
     "react-i18next": "^15.6.0",
-    "sanitize-html": "2.17.7",
+    "sanitize-html": "2.18.1",
     "sharp": "0.35.5",
     "sqlite3": "^5.1.6",
     "swagger-jsdoc": "^6.2.8",
@@ -95,11 +96,11 @@
     "minimatch": ">=9.0.7",
     "path-to-regexp": "0.1.13",
     "lodash": ">=4.18.1",
-    "follow-redirects": ">=1.16.0",
+    "follow-redirects": ">=1.16.1",
     "@tootallnate/once": ">=3.0.1",
     "ip-address": ">=10.5.1",
     "uuid": "^11.1.1",
-    "nodemailer": "^10.0.12",
+    "nodemailer": "^10.1.4",
     "deepmerge-ts": ">=8.0.1"
   }
 }

@@ -8,7 +8,47 @@
 import { api } from '../config/api';
 import type { CustomerGroup } from './customerAdmin.service';
 
-export type ProjectStatus = 'active' | 'archived' | string;
+/** `inquiry` → `active` → `completed`, plus `cancelled` (no job came of it).
+ *  `archived` is what older versions could set. */
+export type ProjectStatus = 'inquiry' | 'active' | 'completed' | 'cancelled' | 'archived';
+
+/** Where an inquiry came from. Keys only; the UI translates them. */
+export const INQUIRY_SOURCES = ['referral', 'website', 'social', 'returning', 'fair', 'other'] as const;
+export type InquirySource = typeof INQUIRY_SOURCES[number];
+
+export type ProjectStageKey = 'inquiry' | 'quote' | 'contract' | 'gallery' | 'invoice' | 'done';
+
+/** Which stages a job has (projectService.PROJECT_FLOWS): the stages a flow
+ *  leaves out read "skipped". */
+export const PROJECT_FLOWS = {
+  full: [] as ProjectStageKey[],
+  no_contract: ['contract'] as ProjectStageKey[],
+  no_quote: ['quote', 'contract'] as ProjectStageKey[],
+};
+export type ProjectFlow = keyof typeof PROJECT_FLOWS;
+/** Stages a project can skip by hand. */
+export const SKIPPABLE_STAGES: ProjectStageKey[] = ['quote', 'contract', 'gallery', 'invoice'];
+/** Derived on the server from what the project holds (projectService.deriveStages). */
+/** `cancelled`: where a cancelled project stopped. */
+export type ProjectStageState = 'done' | 'current' | 'skipped' | 'cancelled' | 'todo' | 'hidden';
+export interface ProjectStage {
+  stages: Array<{ key: ProjectStageKey; state: ProjectStageState }>;
+  current: ProjectStageKey | null;
+}
+
+/** The inquiry a project starts from (migration 315). Dates are YYYY-MM-DD. */
+export interface ProjectInquiryFields {
+  eventType: string | null;
+  eventDate: string | null;
+  eventEndDate: string | null;
+  location: string | null;
+  guestCount: number | null;
+  budgetMinor: number | null;
+  currency: string | null;
+  source: InquirySource | null;
+  notes: string | null;
+  flow: ProjectFlow | null;
+}
 
 /** Rolled-up project value: newest stage wins per deal (invoice > quote;
  *  contracts carry no total), cumulative across events, split by currency. */
@@ -16,16 +56,25 @@ export interface ProjectValuation {
   byCurrency: Array<{ currency: string; totalMinor: number; paidMinor: number }>;
 }
 
-export interface ProjectSummary {
+export interface ProjectSummary extends Partial<ProjectInquiryFields> {
   id: number;
   name: string;
   customerAccountId: number | null;
   customerEmail: string | null;
+  /** per_event / monthly / quarterly / manual; absent without customers.view. */
+  customerBillingCadence?: string | null;
   /** The customer's groups (#1443); only on the cockpit, with customers.view. */
   customerGroups?: CustomerGroup[];
   status: ProjectStatus;
   eventCount?: number;
   valuation?: ProjectValuation;
+  /** Only on the list with `withStages`. */
+  stage?: ProjectStage;
+  /** Stages skipped by hand on this project. */
+  skippedStages?: ProjectStageKey[];
+  /** Cockpit only: new quotes, contracts and invoices may join this project
+   *  (its creator or a super admin; not a legacy ownerless project). */
+  documentsLinkable?: boolean;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -71,6 +120,8 @@ export interface ProjectInvoice {
   currency: string;
   event_id: number | null;
   deal_uuid: string | null;
+  /** Tied by its own project_id, so it can be taken out of the project. */
+  direct?: boolean;
 }
 
 export interface ProjectQuote {
@@ -82,6 +133,7 @@ export interface ProjectQuote {
   total_amount_minor: number;
   currency: string;
   deal_uuid: string | null;
+  source_template_id?: number | null;
 }
 
 export interface ProjectContract {
@@ -119,7 +171,16 @@ export interface ProjectOverview {
   hours: { entries: ProjectHourEntry[]; totalMinutes: number };
   milestones: ProjectMilestone[];
   valuation: ProjectValuation;
+  stage: ProjectStage;
 }
+
+export type ProjectWritePayload = Partial<ProjectInquiryFields> & {
+  skippedStages?: ProjectStageKey[];
+  name?: string;
+  customerAccountId?: number | null;
+  /** `reopen` (update only): the server picks inquiry or active. */
+  status?: ProjectStatus | 'reopen';
+};
 
 export interface EmailPreview {
   id: number;
@@ -134,7 +195,11 @@ export interface EmailPreview {
 }
 
 export const projectsService = {
-  async list(params: { q?: string; status?: string } = {}): Promise<ProjectSummary[]> {
+  /** `status` takes a comma list (`inquiry,active`); `withStages` adds each
+   *  project's stage (the dashboard). */
+  async list({ withStages, ...rest }: { q?: string; status?: string; withStages?: boolean } = {}): Promise<ProjectSummary[]> {
+    const params: Record<string, string> = { ...rest };
+    if (withStages) params.withStages = '1';
     const { data } = await api.get('/admin/projects', { params });
     const body = data.data || data;
     return body.projects || [];
@@ -146,19 +211,21 @@ export const projectsService = {
     return body.project;
   },
 
-  async create(payload: { name: string; customerAccountId?: number | null }): Promise<ProjectSummary> {
+  async create(payload: ProjectWritePayload & { name: string }): Promise<ProjectSummary> {
     const { data } = await api.post('/admin/projects', payload);
     const body = data.data || data;
     return body.project;
   },
 
-  async update(
-    id: number,
-    payload: { name?: string; customerAccountId?: number | null; status?: string },
-  ): Promise<ProjectSummary> {
+  async update(id: number, payload: ProjectWritePayload): Promise<ProjectSummary> {
     const { data } = await api.put(`/admin/projects/${id}`, payload);
     const body = data.data || data;
     return body.project;
+  },
+
+  /** Galleries, documents and hours stay; they only lose the link. */
+  async remove(id: number): Promise<void> {
+    await api.delete(`/admin/projects/${id}`);
   },
 
   async overview(id: number): Promise<ProjectOverview> {
@@ -176,6 +243,14 @@ export const projectsService = {
 
   async assignContract(projectId: number, contractId: number): Promise<void> {
     await api.post(`/admin/projects/${projectId}/contracts`, { contractId });
+  },
+
+  async assignInvoice(projectId: number, invoiceId: number): Promise<void> {
+    await api.post(`/admin/projects/${projectId}/invoices`, { invoiceId });
+  },
+
+  async unassignInvoice(projectId: number, invoiceId: number): Promise<void> {
+    await api.delete(`/admin/projects/${projectId}/invoices/${invoiceId}`);
   },
 
   async emailPreview(emailId: number): Promise<EmailPreview> {

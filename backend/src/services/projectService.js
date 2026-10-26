@@ -17,9 +17,9 @@ const { db, logActivity } = require('../database/db');
 const { AppError } = require('../utils/errors');
 const { hasColumnCached } = require('../utils/schemaCache');
 const { auditedUpdate } = require('./accountingHistory');
-const { redactBearerLinks, hasMaskedRecoveryLink, parseEmailData } = require('../utils/emailSecretRedaction');
+const { redactBearerLinks, hasMaskedRecoveryLink, parseEmailData, MASK } = require('../utils/emailSecretRedaction');
 const {
-  isEncryptedEmailData, isProtectedEmailType, PROTECTED_PENDING_STATUS,
+  isEncryptedEmailData, isProtectedEmailType, maskSecretFields, PROTECTED_PENDING_STATUS,
 } = require('../utils/emailQueueEncryption');
 
 const PENDING_EMAIL_STATUSES = new Set(['pending', PROTECTED_PENDING_STATUS]);
@@ -34,13 +34,70 @@ function pendingStatusFor(row) {
 // Any other account-recovery row that is no longer encrypted (a sent admin
 // reset keeps only the masked password) cannot go back to pending either:
 // the storage guard refuses it, so answer like System Health does.
-function assertResendable(row) {
+async function assertResendable(row, { newMail = false } = {}) {
+  // No administrative emails (migration 300), decided once, at queue time.
+  // Retry / send-now act on THIS row, so only a row that was held back is
+  // refused (while the switch is still on); a row queued before the switch
+  // went on keeps its decision and goes out like the processor would send
+  // it. Resend queues a NEW mail, which is a new decision: it asks the
+  // switch as it is now, whatever happened to the old row.
+  if ((newMail || row.status === 'suppressed') && await require('./_adminEmailOptOut').isRowHeldBack(row)) {
+    throw new AppError('This customer takes no administrative emails, so this email isn\'t sent. Turn the switch off on the customer to send it.', 409, 'NO_ADMIN_EMAILS');
+  }
   if (hasMaskedRecoveryLink(parseEmailData(row.email_data))) {
     throw new AppError('This invitation or password-reset email cannot be sent again: its link is not kept after sending. Send a new invitation or password reset instead.', 409);
   }
   if (isProtectedEmailType(row.email_type) && !isEncryptedEmailData(parseEmailData(row.email_data))) {
     throw new AppError('Create a new invitation or password reset; this recovery email cannot be retried.', 409);
   }
+}
+
+// `inquiry` → `active` → `completed`, plus `cancelled` (no job came of it).
+// `archived` is the value older UIs could set; it stays accepted.
+const PROJECT_STATUSES = ['inquiry', 'active', 'completed', 'cancelled', 'archived'];
+
+// Which stages a job has. The stages a flow leaves out read `skipped`; a
+// project can skip a further one by hand (skipped_stages). Inquiry and done
+// are always there.
+const PROJECT_FLOWS = {
+  full: [],
+  no_contract: ['contract'],
+  no_quote: ['quote', 'contract'],
+};
+const SKIPPABLE_STAGES = ['quote', 'contract', 'gallery', 'invoice'];
+
+function parseSkippedStages(value) {
+  if (!value) return [];
+  return String(value).split(',').map((x) => x.trim()).filter((x) => SKIPPABLE_STAGES.includes(x));
+}
+
+// The inquiry a project starts from (migration 315). API key → column.
+const INQUIRY_FIELDS = {
+  eventType: 'event_type',
+  eventDate: 'event_date',
+  eventEndDate: 'event_end_date',
+  location: 'location',
+  guestCount: 'guest_count',
+  budgetMinor: 'budget_minor',
+  currency: 'currency',
+  source: 'source',
+  notes: 'notes',
+  flow: 'flow',
+};
+const DATE_FIELDS = new Set(['event_date', 'event_end_date']);
+const INT_FIELDS = new Set(['guest_count', 'budget_minor']);
+
+// PostgreSQL hands a `date` column back as a Date at local midnight, SQLite as
+// the stored text. Both leave here as YYYY-MM-DD, so the editor and the
+// document defaults see one shape.
+function toDateOnly(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  }
+  return String(value).slice(0, 10);
 }
 
 function transformProject(p) {
@@ -50,17 +107,163 @@ function transformProject(p) {
     name: p.name,
     customerAccountId: p.customer_account_id || null,
     customerEmail: p.customer_email || null,
+    // How the customer is billed: a monthly or manual customer's invoices go
+    // into one collected draft, so the page offers no project invoice for them.
+    customerBillingCadence: p.customer_billing_cadence ?? undefined,
     status: p.status,
     eventCount: p.event_count != null ? Number(p.event_count) : undefined,
+    eventType: p.event_type ?? null,
+    eventDate: toDateOnly(p.event_date),
+    eventEndDate: toDateOnly(p.event_end_date),
+    location: p.location ?? null,
+    guestCount: p.guest_count != null ? Number(p.guest_count) : null,
+    budgetMinor: p.budget_minor != null ? Number(p.budget_minor) : null,
+    currency: p.currency ?? null,
+    source: p.source ?? null,
+    notes: p.notes ?? null,
+    flow: p.flow || 'full',
+    skippedStages: parseSkippedStages(p.skipped_stages),
     createdAt: p.created_at,
     updatedAt: p.updated_at,
   };
 }
 
+/** The project's end date may not come before its start date, whichever of
+ *  the two an edit changes. */
+function assertDateRange(row) {
+  const start = toDateOnly(row.event_date);
+  const end = toDateOnly(row.event_end_date);
+  if (start && end && end < start) throw new AppError('The end date is before the start date', 400);
+}
+
+/** The inquiry columns `payload` sets, as a row patch. Keys left undefined are
+ *  not touched; an empty value clears the column. Nothing is written on an
+ *  instance that has not run migration 315. */
+async function inquiryPatch(payload = {}) {
+  const patch = {};
+  if (!(await hasColumnCached('projects', 'notes'))) return patch;
+  for (const [key, column] of Object.entries(INQUIRY_FIELDS)) {
+    if (payload[key] === undefined) continue;
+    let value = payload[key];
+    if (value === '' || value === null) value = null;
+    else if (DATE_FIELDS.has(column)) value = toDateOnly(value);
+    else if (INT_FIELDS.has(column)) value = Math.trunc(Number(value));
+    else value = String(value).trim() || null;
+    if (column === 'currency' && value) value = value.toUpperCase();
+    patch[column] = value;
+  }
+  if (payload.skippedStages !== undefined && await hasColumnCached('projects', 'skipped_stages')) {
+    const list = Array.from(new Set((payload.skippedStages || []).filter((x) => SKIPPABLE_STAGES.includes(x))));
+    patch.skipped_stages = list.length ? list.join(',') : null;
+  }
+  return patch;
+}
+
+const CHUNK = 500;
+
+/**
+ * The invoices that belong to each of `projectIds`, attributed to one project
+ * each. An invoice belongs to a project through any of:
+ *   - its gallery (events.project_id), the original rollup;
+ *   - its own invoices.project_id (migration 315), set when it is created from
+ *     the project, e.g. a deposit before any gallery exists;
+ *   - its deal: the deal_uuid of a quote or contract linked to the project;
+ *   - its original: a Storno or reissued invoice of one found above.
+ * `columns` are invoice columns, selected unqualified.
+ */
+async function invoicesForProjects(projectIds, columns) {
+  const found = new Map();
+  if (!projectIds.length) return [];
+  const keep = (rows) => {
+    for (const r of rows) if (!found.has(r.id)) found.set(r.id, r);
+  };
+  // event_id always: the gallery decides which project an invoice belongs to.
+  const cols = Array.from(new Set([...columns, 'event_id'])).map((c) => `inv.${c}`);
+
+  keep(await db('invoices as inv')
+    .join('events as e', 'e.id', 'inv.event_id')
+    .whereIn('e.project_id', projectIds)
+    .select('e.project_id as project_id', ...cols));
+
+  if (await hasColumnCached('invoices', 'project_id')) {
+    keep(await db('invoices as inv')
+      .whereIn('inv.project_id', projectIds)
+      .select('inv.project_id as project_id', ...cols.filter((c) => c !== 'inv.project_id')));
+  }
+
+  if (await hasColumnCached('invoices', 'deal_uuid')) {
+    const dealToProject = new Map();
+    for (const tbl of ['quotes', 'contracts']) {
+      if (!(await hasColumnCached(tbl, 'project_id')) || !(await hasColumnCached(tbl, 'deal_uuid'))) continue;
+      const rows = await db(tbl).whereIn('project_id', projectIds).whereNotNull('deal_uuid')
+        .distinct('deal_uuid', 'project_id');
+      for (const r of rows) if (!dealToProject.has(r.deal_uuid)) dealToProject.set(r.deal_uuid, r.project_id);
+    }
+    const deals = Array.from(dealToProject.keys());
+    const ownColumn = await hasColumnCached('invoices', 'project_id');
+    for (let i = 0; i < deals.length; i += CHUNK) {
+      const rows = await db('invoices as inv').whereIn('inv.deal_uuid', deals.slice(i, i + CHUNK))
+        .select(...cols, ...(ownColumn ? ['inv.project_id as __own_project'] : []));
+      // An invoice tied to a project of its own belongs there, not to the
+      // project its deal's quote or contract was attached to later.
+      keep(rows
+        .filter((r) => r.__own_project == null || Number(r.__own_project) === Number(dealToProject.get(r.deal_uuid)))
+        .map(({ __own_project: _own, ...r }) => ({ ...r, project_id: dealToProject.get(r.deal_uuid) })));
+    }
+  }
+
+  // An invoice whose gallery is in a project belongs to that project, whether
+  // or not that project is among `projectIds`: its own project_id or deal
+  // pointing elsewhere does not count it twice. One rule for the list, the
+  // dashboard and the overview, whatever the status filter.
+  const eventIds = Array.from(new Set(Array.from(found.values()).map((r) => r.event_id).filter((e) => e != null)));
+  if (eventIds.length && await hasColumnCached('events', 'project_id')) {
+    const eventProject = new Map();
+    for (let i = 0; i < eventIds.length; i += CHUNK) {
+      const evs = await db('events').whereIn('id', eventIds.slice(i, i + CHUNK)).whereNotNull('project_id').select('id', 'project_id');
+      for (const e of evs) eventProject.set(e.id, e.project_id);
+    }
+    for (const [id, r] of found) {
+      const owner = eventProject.get(r.event_id);
+      if (owner != null && Number(owner) !== Number(r.project_id)) found.delete(id);
+    }
+  }
+
+  // The Storno of a project's invoice and the invoice reissued for it follow
+  // their original (cancels_invoice_id / replaces_invoice_id), whichever path
+  // brought the original in: neither copies event, project or always the deal.
+  const lineage = [];
+  for (const column of ['cancels_invoice_id', 'replaces_invoice_id']) {
+    if (await hasColumnCached('invoices', column)) lineage.push(column);
+  }
+  let frontier = Array.from(found.values());
+  for (let depth = 0; lineage.length && frontier.length && depth < 5; depth += 1) {
+    const projectOf = new Map(frontier.map((r) => [r.id, r.project_id]));
+    const parents = Array.from(projectOf.keys());
+    const next = [];
+    for (let i = 0; i < parents.length; i += CHUNK) {
+      const slice = parents.slice(i, i + CHUNK);
+      const rows = await db('invoices as inv')
+        .where((w) => { for (const column of lineage) w.orWhereIn(`inv.${column}`, slice); })
+        .select(...cols, ...lineage.map((c) => `inv.${c} as __${c}`));
+      for (const r of rows) {
+        if (found.has(r.id)) continue;
+        const parent = lineage.map((c) => r[`__${c}`]).find((v) => v != null && projectOf.has(v));
+        const row = { ...r, project_id: projectOf.get(parent) };
+        for (const c of lineage) delete row[`__${c}`];
+        found.set(row.id, row);
+        next.push(row);
+      }
+    }
+    frontier = next;
+  }
+  return Array.from(found.values());
+}
+
 /** List projects with customer email + event count + rolled-up value.
  *  `perms` gates which document types feed the value (matches the cockpit):
  *  invoices need bills.view, quotes need quotes.view. */
-async function listProjects({ search = '', status = null, perms = {}, projectIds = null } = {}) {
+async function listProjects({ search = '', status = null, perms = {}, projectIds = null, withStages = false } = {}) {
   let q = db('projects')
     .leftJoin('customer_accounts', 'customer_accounts.id', 'projects.customer_account_id')
     .select(
@@ -74,7 +277,8 @@ async function listProjects({ search = '', status = null, perms = {}, projectIds
   // large project count off the driver's bind-parameter limit, and correctly
   // yields no rows for an admin who owns nothing.
   if (projectIds !== null) q = q.whereIn('projects.id', projectIds);
-  if (status) q = q.where('projects.status', status);
+  if (Array.isArray(status) && status.length) q = q.whereIn('projects.status', status);
+  else if (status && !Array.isArray(status)) q = q.where('projects.status', status);
   if (search) {
     q = q.where(function () {
       this.where('projects.name', 'like', `%${search}%`)
@@ -84,6 +288,7 @@ async function listProjects({ search = '', status = null, perms = {}, projectIds
   const rows = await q;
   const projects = rows.map(transformProject);
   await attachValuations(projects, perms);
+  if (withStages) await attachStages(projects, perms);
   return projects;
 }
 
@@ -97,14 +302,11 @@ async function attachValuations(projects, perms = {}) {
   if (!projects.length) return;
   const projectIds = projects.map((p) => p.id);
 
-  // Invoices roll up by event → project_id; quotes by quotes.project_id.
+  // Invoices roll up by event, own project_id or deal; quotes by quotes.project_id.
   let invoices = [];
   if (perms.bills !== false) {
-    invoices = await db('invoices as inv')
-      .join('events as e', 'e.id', 'inv.event_id')
-      .whereIn('e.project_id', projectIds)
-      .select('e.project_id as project_id', 'inv.id', 'inv.deal_uuid',
-        'inv.total_amount_minor', 'inv.paid_amount_minor', 'inv.currency');
+    invoices = await invoicesForProjects(projectIds,
+      ['id', 'deal_uuid', 'total_amount_minor', 'paid_amount_minor', 'currency']);
   }
   let quotes = [];
   if (perms.quotes !== false && await hasColumnCached('quotes', 'project_id')) {
@@ -153,21 +355,25 @@ async function attachValuations(projects, perms = {}) {
 async function getProjectById(id) {
   const row = await db('projects')
     .leftJoin('customer_accounts', 'customer_accounts.id', 'projects.customer_account_id')
-    .select('projects.*', 'customer_accounts.email as customer_email')
+    .select('projects.*', 'customer_accounts.email as customer_email',
+      'customer_accounts.billing_cadence as customer_billing_cadence')
     .where('projects.id', id)
     .first();
   return transformProject(row);
 }
 
-async function createProject({ name, customerAccountId = null }, adminId) {
+async function createProject({ name, customerAccountId = null, status = 'active', ...fields }, adminId) {
   if (!name || !String(name).trim()) throw new AppError('Project name is required', 400);
+  if (!PROJECT_STATUSES.includes(status)) throw new AppError('Unknown project status', 400, 'PROJECT_STATUS_UNKNOWN');
   const row = {
     name: String(name).trim(),
     customer_account_id: customerAccountId || null,
-    status: 'active',
+    status,
+    ...(await inquiryPatch(fields)),
     created_at: new Date(),
     updated_at: new Date(),
   };
+  assertDateRange(row);
   // Record the owner (GHSA-wrg5). adminId was already passed in and silently
   // discarded, which left a brand-new empty project with no derivable owner —
   // it has no linked events to infer one from yet. Guarded so an instance that
@@ -193,17 +399,63 @@ async function projectLinkedCustomerIds(id, conn = db) {
       .distinct('eca.customer_account_id as cid');
     for (const r of rows) if (r.cid != null) ids.add(Number(r.cid));
   }
-  for (const tbl of ['quotes', 'contracts']) {
+  // Every linked document counts, not only the caller's: the rule is about the
+  // project, and the CRM access layer would otherwise hide another admin's
+  // quote from this read. Only customer ids leave this function.
+  const { withTrustedCrmAccess } = require('../database/crmAccess');
+  for (const tbl of ['quotes', 'contracts', 'invoices']) {
     if (await hasColumnCached(tbl, 'project_id') && await hasColumnCached(tbl, 'customer_account_id')) {
-      for (const r of await conn(tbl).where({ project_id: id }).whereNotNull('customer_account_id').distinct('customer_account_id as cid')) {
-        if (r.cid != null) ids.add(Number(r.cid));
-      }
+      const rows = await withTrustedCrmAccess('project single-customer rule',
+        () => conn(tbl).where({ project_id: id }).whereNotNull('customer_account_id').distinct('customer_account_id as cid'));
+      for (const r of rows) if (r.cid != null) ids.add(Number(r.cid));
     }
   }
   return ids;
 }
 
-async function updateProject(id, { name, customerAccountId, status }) {
+/** Hold a project to `customerAccountId` for a new document: a project with no
+ *  customer adopts it (first content wins, as assignEvent does), but only when
+ *  nothing it already holds belongs to someone else. Atomic: the adoption is a
+ *  conditional UPDATE, so two documents for different customers racing on an
+ *  empty project cannot both win. Returns false when the project is another
+ *  customer's, 'kept' when it already was this one's, 'adopted' when it became
+ *  so now (undo with releaseAdoptedCustomer if the document is not created). */
+async function holdProjectToCustomer(projectId, customerAccountId) {
+  const cid = Number(customerAccountId);
+  const project = await db('projects').where({ id: projectId }).first('customer_account_id');
+  if (!project) return false;
+  if (project.customer_account_id != null) return Number(project.customer_account_id) === cid ? 'kept' : false;
+  for (const linked of await projectLinkedCustomerIds(projectId)) if (linked !== cid) return false;
+  const changed = await db('projects').where({ id: projectId }).whereNull('customer_account_id')
+    .update({ customer_account_id: cid, updated_at: new Date() });
+  const after = await db('projects').where({ id: projectId }).first('customer_account_id');
+  if (Number(after?.customer_account_id) !== cid) return false;
+  return changed ? 'adopted' : 'kept';
+}
+
+/** Whether the project holds a gallery or a quote, contract or invoice
+ *  (anyone's: the status describes the project, not the caller's view of it). */
+async function projectHoldsAnything(id) {
+  if (await hasColumnCached('events', 'project_id') && await db('events').where({ project_id: id }).first('id')) return true;
+  const { withTrustedCrmAccess } = require('../database/crmAccess');
+  for (const tbl of ['quotes', 'contracts', 'invoices']) {
+    if (!(await hasColumnCached(tbl, 'project_id'))) continue;
+    const row = await withTrustedCrmAccess('project status rule', () => db(tbl).where({ project_id: id }).first('id'));
+    if (row) return true;
+  }
+  return false;
+}
+
+/** Undo an adoption by holdProjectToCustomer when the document it was for was
+ *  not created, unless the project has meanwhile got something of that
+ *  customer's to hold it. */
+async function releaseAdoptedCustomer(projectId, customerAccountId) {
+  if ((await projectLinkedCustomerIds(projectId)).size) return;
+  await db('projects').where({ id: projectId, customer_account_id: Number(customerAccountId) })
+    .update({ customer_account_id: null, updated_at: new Date() });
+}
+
+async function updateProject(id, { name, customerAccountId, status, ...fields }) {
   const existing = await db('projects').where({ id }).first();
   if (!existing) throw new AppError('Project not found', 404);
   const patch = { updated_at: new Date() };
@@ -222,9 +474,83 @@ async function updateProject(id, { name, customerAccountId, status }) {
     }
     patch.customer_account_id = next;
   }
-  if (status !== undefined) patch.status = status;
+  if (status === 'reopen') {
+    // Back to where it was before it closed: an inquiry while it holds
+    // nothing, active otherwise. Decided here, on every linked record, not
+    // from the caller's overview, which leaves out what they may not see.
+    status = (await projectHoldsAnything(id)) ? 'active' : 'inquiry';
+  }
+  if (status !== undefined) {
+    if (!PROJECT_STATUSES.includes(status)) throw new AppError('Unknown project status', 400, 'PROJECT_STATUS_UNKNOWN');
+    // An inquiry is a project with nothing attached yet (promoteInquiry turns
+    // it active on the first document); it cannot be set back on one that holds
+    // galleries or documents.
+    if (status === 'inquiry' && existing.status !== 'inquiry' && await projectHoldsAnything(id)) {
+      throw new AppError('A project that holds galleries or documents cannot go back to an inquiry', 422, 'PROJECT_NOT_EMPTY');
+    }
+    patch.status = status;
+  }
+  Object.assign(patch, await inquiryPatch(fields));
+  assertDateRange({ ...existing, ...patch });
   await db('projects').where({ id }).update(patch);
+  // A document attached between the check above and this write found the
+  // project closed, so nothing promoted it: an inquiry that holds something
+  // turns active now.
+  if (patch.status === 'inquiry' && await projectHoldsAnything(id)) await promoteInquiry(id);
   return getProjectById(id);
+}
+
+/** Delete a project. Its galleries, documents and hours stay and only lose the
+ *  link: done explicitly, because SQLite runs without PRAGMA foreign_keys and
+ *  the audited tables have to record the change (accountingHistoryReferences).
+ *  `checked` is what the caller vetted (DELETE /projects/:id: the ids of the
+ *  linked records per table, and of the galleries); the transaction reads
+ *  them again and refuses when anything differs. On SQLite nothing can write
+ *  in between (one writer); on PostgreSQL the window shrinks to the few
+ *  statements after the re-read, since the attach paths take no lock on the
+ *  project. */
+async function deleteProject(id, actor = null, { checked = null } = {}) {
+  const existing = await db('projects').where({ id }).first('id');
+  if (!existing) throw new AppError('Project not found', 404);
+  const { deleteWithAccountingHistory } = require('./accountingHistory');
+  const { withTrustedCrmAccess } = require('../database/crmAccess');
+  // Resolved before the transaction: on SQLite a query on the global
+  // connection waits for the one the transaction holds.
+  const eventsLinked = await hasColumnCached('events', 'project_id');
+  const documentsLinked = await hasColumnCached('customer_documents', 'project_id');
+  const tables = checked ? Object.keys(checked.ids) : [];
+  await db.transaction(async (trx) => {
+    if (checked) {
+      const changed = () => new AppError('Something was added to the project meanwhile. Check it and delete again.', 409, 'PROJECT_CHANGED');
+      const same = (a, b) => {
+        const x = a.map(Number).sort((m, n) => m - n);
+        const y = b.map(Number).sort((m, n) => m - n);
+        return x.length === y.length && x.every((v, i) => v === y[i]);
+      };
+      for (const table of tables) {
+        const now = await withTrustedCrmAccess('project delete: re-read in the transaction',
+          () => trx(table).where({ project_id: id }).pluck('id'));
+        if (!same(now, checked.ids[table])) throw changed();
+      }
+      if (eventsLinked && !same(await trx('events').where({ project_id: id }).pluck('id'), checked.eventIds)) throw changed();
+    }
+    if (eventsLinked) {
+      await trx('events').where({ project_id: id }).update({ project_id: null });
+    }
+    if (documentsLinked) {
+      await trx('customer_documents').where({ project_id: id }).update({ project_id: null });
+    }
+    await deleteWithAccountingHistory(trx, 'projects', { id },
+      { actor: actor?.id ?? null, source: 'project.delete' });
+  });
+  return { id };
+}
+
+/** An inquiry becomes an active project the moment something is attached to
+ *  it: a quote, contract, gallery or invoice. Any other status is left alone. */
+async function promoteInquiry(projectId, conn = db) {
+  await conn('projects').where({ id: projectId, status: 'inquiry' })
+    .update({ status: 'active', updated_at: new Date() });
 }
 
 /** Distinct customer_account_ids an event is assigned to (event_customer_assignments
@@ -258,6 +584,7 @@ async function assignEvent(projectId, eventId) {
   }
 
   await db('events').where({ id: eventId }).update({ project_id: projectId });
+  await promoteInquiry(projectId);
   return { projectId, eventId };
 }
 
@@ -279,6 +606,39 @@ async function isSuperAdmin(actor, conn = db) {
   } catch (err) {
     return false;
   }
+}
+
+/**
+ * The project a document made by `adminId` from another document may keep
+ * (quote → contract, quote/contract → gallery), or null. Resolve it before
+ * opening the conversion's transaction (global db reads).
+ *  - With the projects feature off, none: nothing changes for such installs.
+ *  - A super admin keeps any.
+ *  - `target: 'documents'` (a contract, an invoice): a project the caller
+ *    created. That is the rule the CRM access layer applies to project_id on
+ *    a quote, contract or invoice write (crmAccess validateWrite), so a
+ *    carried link never fails the write.
+ *  - `target: 'events'`: a project the converter owns as the project routes
+ *    see it (ownedProjectsSubquery, legacy ownerless projects included), so a
+ *    gallery never lands in another admin's project. An unattended workflow
+ *    step (no admin) keeps the source document's own project: no person is
+ *    acting, so there is no one to leak it to.
+ */
+async function carriedProjectId(projectId, adminId, { target = 'documents' } = {}) {
+  if (!projectId) return null;
+  const { isFeatureEnabled } = require('../middleware/requireFeatureFlag');
+  if (!(await isFeatureEnabled('projects'))) return null;
+  if (!adminId) return target === 'events' ? projectId : null;
+  if (await isSuperAdmin({ id: adminId })) return projectId;
+  let q = db('projects').where('projects.id', projectId);
+  if (target === 'events') {
+    const owned = require('../middleware/ownership').ownedProjectsSubquery({ id: adminId });
+    if (owned !== null) q = q.whereIn('projects.id', owned);
+  } else {
+    q = q.where('projects.created_by', adminId);
+  }
+  const row = await q.first('projects.id');
+  return row ? row.id : null;
 }
 
 /**
@@ -347,8 +707,9 @@ async function linkDealToProject(dealUuid, projectId, conn = db, actor = null) {
   // to be vetted: every caller writes `project_id` onto its own row BEFORE
   // calling us, and `deal_uuid` is nullable (migration 107). A legacy quote
   // with no deal would otherwise return here having bypassed the check while
-  // its foreign project link stood.
-  if (!dealUuid) return;
+  // its foreign project link stood. The caller linked a document, so an
+  // inquiry turns active, here and after the last check below.
+  if (!dealUuid) { await promoteInquiry(projectId, conn); return; }
 
   // Collect ALL the deal's customers across its quote/contract/invoice lineage
   // AND every event it converted into — BEFORE mutating anything, so a link
@@ -423,6 +784,14 @@ async function linkDealToProject(dealUuid, projectId, conn = db, actor = null) {
   if (contractsHaveDeal && await hasColumnCached('contracts', 'project_id')) {
     await auditedUpdate(conn, 'contracts', { deal_uuid: dealUuid }, { project_id: projectId }, history);
   }
+  // A deal lives in one project: its invoices tied to a project of their own
+  // (created in or attached to one, migration 315) move with it, or the deal
+  // would count in two projects. Invoices without one follow the deal anyway.
+  if (await hasColumnCached('invoices', 'deal_uuid') && await hasColumnCached('invoices', 'project_id')) {
+    await auditedUpdate(conn, 'invoices',
+      (q) => q.where({ deal_uuid: dealUuid }).whereNotNull('project_id').whereNot('project_id', projectId),
+      { project_id: projectId }, history);
+  }
   if (eventIds.size && await hasColumnCached('events', 'project_id')) {
     await conn('events').whereIn('id', Array.from(eventIds)).update({ project_id: projectId });
   }
@@ -432,6 +801,9 @@ async function linkDealToProject(dealUuid, projectId, conn = db, actor = null) {
     const adopt = [...dealCustomerIds][0];
     await conn('projects').where({ id: projectId }).update({ customer_account_id: adopt, updated_at: new Date() });
   }
+
+  // Every check has passed and the document is linked: an inquiry turns active.
+  await promoteInquiry(projectId, conn);
 }
 
 /** Attach (or, with projectId=null, detach) a quote/contract to a project.
@@ -470,11 +842,226 @@ async function assignDocument(table, projectId, documentId, actor = null) {
   }
   await auditedUpdate(db, table, { id: documentId }, { project_id: projectId || null },
     { actor: actor?.id ?? null, source: 'project.assign_document' });
+  if (projectId) await promoteInquiry(projectId);
   return { projectId: projectId || null, documentId };
 }
 
 const assignQuote = (projectId, quoteId, actor) => assignDocument('quotes', projectId, quoteId, actor);
 const assignContract = (projectId, contractId, actor) => assignDocument('contracts', projectId, contractId, actor);
+
+/**
+ * Whether any record of deal `dealUuid` is linked to a project other than
+ * `projectId`: a quote, contract or invoice of it, a gallery one of its quotes
+ * or contracts was converted into, or the gallery of one of its invoices.
+ * linkDealToProject moves every one of those. Unscoped: another admin's
+ * records count. `conn` is a transaction when re-checking inside one.
+ */
+async function dealProjectElsewhere(dealUuid, projectId, conn = db) {
+  const { withTrustedCrmAccess } = require('../database/crmAccess');
+  return withTrustedCrmAccess('project attach: deal lineage elsewhere', async () => {
+    const galleries = [];
+    for (const tbl of ['quotes', 'contracts', 'invoices']) {
+      if (!(await hasColumnCached(tbl, 'deal_uuid')) || !(await hasColumnCached(tbl, 'project_id'))) continue;
+      const elsewhere = await conn(tbl).where({ deal_uuid: dealUuid })
+        .whereNotNull('project_id').whereNot('project_id', projectId).first('id');
+      if (elsewhere) return true;
+      const galleryColumn = tbl === 'invoices' ? 'event_id' : 'converted_event_id';
+      if (await hasColumnCached(tbl, galleryColumn)) {
+        galleries.push(...await conn(tbl).where({ deal_uuid: dealUuid }).whereNotNull(galleryColumn).pluck(galleryColumn));
+      }
+    }
+    if (galleries.length && await hasColumnCached('events', 'project_id')) {
+      const moved = await conn('events').whereIn('id', Array.from(new Set(galleries)))
+        .whereNotNull('project_id').whereNot('project_id', projectId).first('id');
+      if (moved) return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * For the add window: whether attaching quote or contract `doc` to project
+ * `projectId` takes anything out of another project. linkDealToProject moves
+ * the whole deal, so this is the document itself or any record of its deal
+ * (dealProjectElsewhere), including an invoice tied to another project.
+ */
+async function documentAttachMoves(doc, projectId, dealCache = null) {
+  if (doc.project_id != null && Number(doc.project_id) !== Number(projectId)) return true;
+  if (!doc.deal_uuid) return false;
+  if (dealCache?.has(doc.deal_uuid)) return dealCache.get(doc.deal_uuid);
+  const elsewhere = !!(await dealProjectElsewhere(doc.deal_uuid, projectId));
+  dealCache?.set(doc.deal_uuid, elsewhere);
+  return elsewhere;
+}
+
+/**
+ * documentAttachMoves for each listed quote or contract (GET /quotes or
+ * /contracts ?attachTo=), or null when the projects feature is off or the
+ * caller may not work on that project: the rule reads other projects
+ * unscoped.
+ */
+async function attachMovesFor(admin, rows, projectId) {
+  if (!projectId) return null;
+  const { isFeatureEnabled } = require('../middleware/requireFeatureFlag');
+  const { ownsProject } = require('../middleware/ownership');
+  if (!(await isFeatureEnabled('projects')) || !(await ownsProject(admin, projectId))) return null;
+  // A deal's lineage is read once, however many listed rows share it.
+  const dealCache = new Map();
+  const moves = [];
+  for (const row of rows) moves.push(await documentAttachMoves(row, projectId, dealCache));
+  return moves;
+}
+
+/**
+ * Why invoice `inv` may not join project `projectId`, or null when it may.
+ * One rule for the attach (before and inside its transaction) and for the
+ * add window (GET /invoices?attachTo=), so the window never offers what the
+ * attach refuses. `inv` needs id, project_id, deal_uuid, event_id and, where
+ * the columns exist, is_monthly_draft and monthly_period_start.
+ */
+async function invoiceAttachRefusal(inv, projectId, conn = db) {
+  // A monthly or manual customer's collected invoice spans their galleries,
+  // so it cannot belong to one project (as POST /invoices refuses it).
+  if (truthyFlag(inv.is_monthly_draft) || inv.monthly_period_start != null) {
+    return { status: 422, code: 'PROJECT_INVOICE_COLLECTED_BILLING', message: 'A collected monthly or manual invoice cannot belong to one project' };
+  }
+  if (inv.project_id != null && Number(inv.project_id) !== Number(projectId)) {
+    return { status: 422, code: 'PROJECT_INVOICE_ELSEWHERE', message: 'This invoice belongs to another project' };
+  }
+  if (inv.deal_uuid && await dealProjectElsewhere(inv.deal_uuid, projectId, conn)) {
+    return { status: 422, code: 'PROJECT_DEAL_ELSEWHERE', message: 'Its quote, contract or another invoice of the same deal belongs to another project' };
+  }
+  if (inv.event_id && await hasColumnCached('events', 'project_id')) {
+    const event = await conn('events').where({ id: inv.event_id }).first('project_id');
+    if (event?.project_id != null && Number(event.project_id) !== Number(projectId)) {
+      return { status: 422, code: 'PROJECT_EVENT_MISMATCH', message: 'This invoice’s gallery belongs to another project' };
+    }
+  }
+  return null;
+}
+
+const truthyFlag = (v) => v === true || v === 1 || v === '1' || v === 't';
+const INVOICE_ATTACH_COLUMNS = ['id', 'event_id', 'deal_uuid', 'customer_account_id', 'project_id'];
+
+/**
+ * Attach an existing invoice, e.g. to set up a project for a job that is
+ * already finished. Only `project_id` changes, never the issued invoice
+ * itself. Its deal comes along (linkDealToProject: quotes, contracts, sibling
+ * invoices and the galleries they made), and so does its gallery when that is
+ * in no project yet. Its Storno and reissue follow through the lineage rollup.
+ *
+ * Refused before anything is written when the caller may not tie documents to
+ * this project (the CRM write rule, the same carriedProjectId the cockpit's
+ * documentsLinkable reports), for any reason invoiceAttachRefusal gives, or
+ * when it or its gallery is another customer's. The transaction locks the
+ * invoice row and checks invoiceAttachRefusal again, so two attaches (or an
+ * attach and a quote attach moving the deal) cannot both pass; a refusal
+ * leaves nothing behind, and a customer the empty project adopted is given
+ * back. The caller's route vets the gallery owner.
+ */
+async function assignInvoice(projectId, invoiceId, actor = null) {
+  if (!(await hasColumnCached('invoices', 'project_id'))) {
+    throw new AppError('This instance has no invoices.project_id column yet — run migrations', 409);
+  }
+  const project = await db('projects').where({ id: projectId }).first('id');
+  if (!project) throw new AppError('Project not found', 404);
+  if (actor?.id && !(await carriedProjectId(projectId, actor.id))) {
+    throw new AppError('Documents can join only a project you created', 403, 'PROJECT_NOT_LINKABLE');
+  }
+  const columns = [...INVOICE_ATTACH_COLUMNS];
+  for (const c of ['is_monthly_draft', 'monthly_period_start']) if (await hasColumnCached('invoices', c)) columns.push(c);
+  const inv = await db('invoices').where({ id: invoiceId }).first(columns);
+  if (!inv) throw new AppError('Invoice not found', 404);
+  const refusal = await invoiceAttachRefusal(inv, projectId);
+  if (refusal) throw new AppError(refusal.message, refusal.status, refusal.code);
+
+  const eventsLinked = await hasColumnCached('events', 'project_id');
+  const event = inv.event_id && eventsLinked ? await db('events').where({ id: inv.event_id }).first('id', 'project_id') : null;
+
+  // Projects hold one customer: the invoice's, and its gallery's (as
+  // assignEvent checks it). An empty project adopts the first.
+  const adopted = [];
+  const hold = async (customerAccountId) => {
+    const held = await holdProjectToCustomer(projectId, customerAccountId);
+    if (!held) throw new AppError('That belongs to a different customer than this project', 422, 'PROJECT_CUSTOMER_MISMATCH');
+    if (held === 'adopted') adopted.push(customerAccountId);
+  };
+  const release = async () => {
+    for (const cid of adopted) await releaseAdoptedCustomer(projectId, cid);
+  };
+  try {
+    if (inv.customer_account_id != null) await hold(inv.customer_account_id);
+    if (event && event.project_id == null) {
+      const evCustomers = await eventCustomerIds(event.id);
+      const current = (await db('projects').where({ id: projectId }).first('customer_account_id'))?.customer_account_id;
+      if (current != null && evCustomers.length && !evCustomers.includes(Number(current))) {
+        throw new AppError('That belongs to a different customer than this project', 422, 'PROJECT_CUSTOMER_MISMATCH');
+      }
+      if (current == null && evCustomers.length === 1) await hold(evCustomers[0]);
+    }
+  } catch (err) {
+    await release();
+    throw err;
+  }
+
+  // Resolved before the transaction: on SQLite a query on the global
+  // connection waits for the one the transaction holds.
+  for (const [table, column] of [['quotes', 'deal_uuid'], ['quotes', 'project_id'], ['quotes', 'converted_event_id'],
+    ['contracts', 'deal_uuid'], ['contracts', 'project_id'], ['contracts', 'converted_event_id'], ['invoices', 'deal_uuid'],
+    ['invoices', 'event_id']]) {
+    await hasColumnCached(table, column);
+  }
+  try {
+    await db.transaction(async (trx) => {
+      // Lock the invoice and check again: what was read above may have
+      // changed by now (another attach, a quote attach moving the deal).
+      const lock = trx('invoices').where({ id: invoiceId }).first(columns);
+      if (trx.client.config.client === 'pg') lock.forUpdate();
+      const locked = await lock;
+      if (!locked) throw new AppError('Invoice not found', 404);
+      const late = await invoiceAttachRefusal(locked, projectId, trx);
+      if (late) throw new AppError(late.message, late.status, late.code);
+      if (inv.deal_uuid) await linkDealToProject(inv.deal_uuid, projectId, trx, actor);
+      if (event && event.project_id == null) {
+        // Conditional: a gallery moved into another project meanwhile is refused.
+        const moved = await trx('events').where({ id: event.id })
+          .where((w) => w.whereNull('project_id').orWhere('project_id', projectId))
+          .update({ project_id: projectId });
+        if (!moved) throw new AppError('This invoice’s gallery belongs to another project', 422, 'PROJECT_EVENT_MISMATCH');
+      }
+      await auditedUpdate(trx, 'invoices', { id: invoiceId }, { project_id: projectId },
+        { actor: actor?.id ?? null, source: 'project.assign_invoice' });
+      await promoteInquiry(projectId, trx);
+    });
+  } catch (err) {
+    await release();
+    throw err;
+  }
+  return { projectId, invoiceId };
+}
+
+/**
+ * Take an invoice out of the project it was created in or attached to
+ * (clears invoices.project_id, audited). Only an invoice tied to this project
+ * by its own project_id: one that rolls up through its gallery or deal leaves
+ * with that gallery or document. The same write rule as attaching.
+ */
+async function unassignInvoice(projectId, invoiceId, actor = null) {
+  if (!(await hasColumnCached('invoices', 'project_id'))) {
+    throw new AppError('This instance has no invoices.project_id column yet — run migrations', 409);
+  }
+  if (actor?.id && !(await carriedProjectId(projectId, actor.id))) {
+    throw new AppError('Documents can join only a project you created', 403, 'PROJECT_NOT_LINKABLE');
+  }
+  const inv = await db('invoices').where({ id: invoiceId }).first('id', 'project_id');
+  if (!inv) throw new AppError('Invoice not found', 404);
+  if (Number(inv.project_id) !== Number(projectId)) {
+    throw new AppError('This invoice is in the project through its gallery or deal; move that instead', 422, 'PROJECT_INVOICE_NOT_DIRECT');
+  }
+  await auditedUpdate(db, 'invoices', { id: invoiceId, project_id: projectId }, { project_id: null },
+    { actor: actor?.id ?? null, source: 'project.unassign_invoice' });
+  return { projectId, invoiceId };
+}
 
 /**
  * Project valuation — "newest stage wins per deal, cumulative across events".
@@ -531,6 +1118,96 @@ function computeValuation(invoices = [], quotes = []) {
   };
 }
 
+// ── Stages ──────────────────────────────────────────────────────────────
+//
+// Where a project stands, derived from what it holds rather than set by hand,
+// so a quote created outside the project flow still moves it forward:
+//   inquiry  — always done once the project exists;
+//   quote    — a quote was accepted (or already converted);
+//   contract — a contract is fully signed;
+//   gallery  — a gallery was published (expiry does not undo it);
+//   invoice  — it has invoices and every one that still counts is paid;
+//   done     — the admin completed the project.
+// A stage that is not done while a later one is reads `skipped`. The first
+// stage after the last done one is `current`; on a cancelled project it reads
+// `cancelled` instead (where the job stopped) and the rest stay `todo`; a
+// completed project has no current stage either. A stage whose documents the
+// admin may not see reads `hidden`.
+const STAGES = ['inquiry', 'quote', 'contract', 'gallery', 'invoice', 'done'];
+const QUOTE_DONE = new Set(['accepted', 'converted']);
+const CONTRACT_DONE = new Set(['fully_signed']);
+const INVOICE_IGNORED = new Set(['cancelled', 'skipped', 'draft']);
+
+const truthy = (v) => v === true || v === 1 || v === '1';
+
+function deriveStages({ status, flow, skippedStages = [], quotes = [], contracts = [], events = [], invoices = [] }, perms = {}) {
+  const counting = invoices.filter((inv) => inv.kind !== 'storno' && !INVOICE_IGNORED.has(inv.status));
+  const done = {
+    inquiry: true,
+    quote: quotes.some((q) => QUOTE_DONE.has(q.status)),
+    contract: contracts.some((c) => CONTRACT_DONE.has(c.status)),
+    // Published once is done: an expired gallery (is_active off) stays done.
+    gallery: events.some((e) => !truthy(e.is_draft)),
+    invoice: counting.length > 0 && counting.every((inv) => inv.status === 'paid'),
+    done: status === 'completed',
+  };
+  const hidden = { quote: perms.quotes === false, contract: perms.contracts === false, invoice: perms.bills === false };
+  // Left out by the project's flow or skipped by hand. A stage that is done
+  // anyway (a contract signed after all) still reads done.
+  const leftOut = new Set([...(PROJECT_FLOWS[flow] || []), ...(skippedStages || [])]);
+  let lastDone = -1;
+  STAGES.forEach((key, i) => { if (done[key] && !hidden[key]) lastDone = i; });
+  const completed = status === 'completed';
+  const cancelled = status === 'cancelled';
+  let current = null;
+  let stoppedAt = null;
+  const stages = STAGES.map((key, i) => {
+    let state;
+    // Where a cancelled job stopped is the first stage after the last done one,
+    // whether or not this admin may see it: a hidden stage stays hidden, and the
+    // cross is not moved onto a later stage it never reached.
+    const left = leftOut.has(key) && !done[key];
+    if (cancelled && stoppedAt === null && !done[key] && !left && i > lastDone) {
+      stoppedAt = key;
+      state = hidden[key] ? 'hidden' : 'cancelled';
+    } else if (hidden[key]) state = 'hidden';
+    else if (done[key]) state = 'done';
+    else if (left) state = 'skipped';
+    else if (i < lastDone || (completed && key !== 'done')) state = 'skipped';
+    else if (!completed && !cancelled && current === null) { state = 'current'; current = key; }
+    else state = 'todo';
+    return { key, state };
+  });
+  return { stages, current };
+}
+
+/** Attach `stage` ({ stages, current }) to each listed project, in bulk. */
+async function attachStages(projects, perms = {}) {
+  if (!projects.length) return;
+  const ids = projects.map((p) => p.id);
+  const group = (rows) => {
+    const m = new Map();
+    for (const r of rows) { const l = m.get(r.project_id) || []; l.push(r); m.set(r.project_id, l); }
+    return m;
+  };
+  const quotes = perms.quotes !== false && await hasColumnCached('quotes', 'project_id')
+    ? group(await db('quotes').whereIn('project_id', ids).select('project_id', 'status')) : new Map();
+  const contracts = perms.contracts !== false && await hasColumnCached('contracts', 'project_id')
+    ? group(await db('contracts').whereIn('project_id', ids).select('project_id', 'status')) : new Map();
+  const events = group(await db('events').whereIn('project_id', ids).select('project_id', 'is_draft'));
+  const invoices = perms.bills !== false
+    ? group(await invoicesForProjects(ids, ['id', 'status', 'kind', 'deal_uuid'])) : new Map();
+  for (const p of projects) {
+    p.stage = deriveStages({
+      status: p.status,
+      flow: p.flow,
+      skippedStages: p.skippedStages,
+      quotes: quotes.get(p.id), contracts: contracts.get(p.id),
+      events: events.get(p.id), invoices: invoices.get(p.id),
+    }, perms);
+  }
+}
+
 /**
  * Full overview aggregation for the cockpit. Returns the project, its events,
  * and the rolled-up emails / quotes / contracts / invoices / hours + a
@@ -577,15 +1254,32 @@ async function getProjectOverview(id, perms = {}, admin = null) {
     );
   }
 
+  // Whether new quotes, contracts and invoices may join this project: the
+  // CRM write rule ties project_id to the project's creator (or a super
+  // admin), so a legacy ownerless project can show them but not take new ones.
+  project.documentsLinkable = admin?.id != null && (await carriedProjectId(id, admin.id)) != null;
+
   const out = { project, events, emails: [], quotes: [], contracts: [], invoices: [], hours: { entries: [], totalMinutes: 0 } };
 
-  // Invoices (by event) incl. storno.
-  if (eventIds.length && perms.bills !== false) {
-    out.invoices = await db('invoices')
-      .whereIn('event_id', eventIds)
-      .select('id', 'invoice_number', 'status', 'kind', 'issue_date', 'due_date',
-        'total_amount_minor', 'paid_amount_minor', 'paid_at', 'currency', 'event_id', 'deal_uuid')
-      .orderBy('issue_date', 'desc');
+  // Invoices (by event, own project_id or deal) incl. storno; one whose
+  // gallery is in another project belongs to that one (invoicesForProjects).
+  if (perms.bills !== false) {
+    const rows = await invoicesForProjects([id], ['id', 'invoice_number', 'status', 'kind', 'issue_date', 'due_date',
+      'total_amount_minor', 'paid_amount_minor', 'paid_at', 'currency', 'event_id', 'deal_uuid']);
+    // `direct`: tied by its own project_id, so it can be taken out of the
+    // project (DELETE /projects/:id/invoices/:invoiceId); one that rolls up
+    // through its gallery or deal leaves with that.
+    const direct = new Set();
+    if (rows.length && await hasColumnCached('invoices', 'project_id')) {
+      const ids = rows.map((r) => r.id);
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        for (const r of await db('invoices').whereIn('id', ids.slice(i, i + CHUNK)).where({ project_id: id }).select('id')) direct.add(r.id);
+      }
+    }
+    out.invoices = rows
+      .map(({ project_id: _p, ...inv }) => ({ ...inv, direct: direct.has(inv.id) }))
+      // Newest first, as before. Compared as times: PostgreSQL returns Dates.
+      .sort((a, b) => (b.issue_date ? new Date(b.issue_date).getTime() : 0) - (a.issue_date ? new Date(a.issue_date).getTime() : 0));
   }
 
   // Quotes / contracts. These tables carry no event_id (migration 107), so
@@ -596,8 +1290,12 @@ async function getProjectOverview(id, perms = {}, admin = null) {
   const contractsHaveProjectId = await hasColumnCached('contracts', 'project_id');
 
   if (perms.quotes !== false && (quotesHaveProjectId || project.customerAccountId)) {
+    // source_template_id preselects the contract template when the project
+    // page converts an accepted quote (ConvertToContractDialog).
+    const quoteCols = ['id', 'quote_number', 'status', 'issue_date', 'valid_until', 'total_amount_minor', 'currency', 'deal_uuid'];
+    if (await hasColumnCached('quotes', 'source_template_id')) quoteCols.push('source_template_id');
     let q = db('quotes')
-      .select('id', 'quote_number', 'status', 'issue_date', 'valid_until', 'total_amount_minor', 'currency', 'deal_uuid')
+      .select(quoteCols)
       .orderBy('issue_date', 'desc');
     if (quotesHaveProjectId) q = q.where({ project_id: id });
     else q = q.where({ customer_account_id: project.customerAccountId });
@@ -708,6 +1406,8 @@ async function getProjectOverview(id, perms = {}, admin = null) {
   // Rolled-up project value (newest stage wins per deal, cumulative).
   out.valuation = computeValuation(out.invoices, out.quotes);
 
+  out.stage = deriveStages({ status: project.status, flow: project.flow, skippedStages: project.skippedStages, ...out }, perms);
+
   return out;
 }
 
@@ -736,6 +1436,8 @@ async function getEmailPreview(emailId) {
   try {
     let variables = row.email_data;
     if (typeof variables === 'string') variables = JSON.parse(variables);
+    // A waiting row keeps its passwords sealed; the preview shows the mask.
+    variables = maskSecretFields(variables, MASK);
     const { renderQueuedEmail } = require('./emailProcessor');
     const rendered = await renderQueuedEmail(row.email_type, variables || {}, row.recipient_email);
     html = rendered && rendered.html ? rendered.html : null;
@@ -770,7 +1472,7 @@ async function logEmailAction(activityType, emailId, row, adminId) {
 async function resendEmail(emailId, adminId = null) {
   const row = await db('email_queue').where({ id: emailId }).first();
   if (!row) throw new AppError('Email not found', 404);
-  assertResendable(row);
+  await assertResendable(row, { newMail: true });
   // Normalise email_data to match the canonical enqueue (emailProcessor.js
   // stores JSON.stringify(...) in the json column). PG returns jsonb as a
   // parsed object, SQLite as a string — re-stringify the object form so the
@@ -785,6 +1487,10 @@ async function resendEmail(emailId, adminId = null) {
     status: pendingStatusFor(row),
     retry_count: 0,
     created_at: new Date(),
+    // The queue time of the mail this copy repeats (migration 307): erasure
+    // attributes mail to an address holder by it, and the address may have
+    // changed hands since. A copy of a copy keeps the first mail's time.
+    original_created_at: row.original_created_at ?? row.created_at,
     // Explicit NULL: the column default is text on SQLite and never comes
     // due (issue 1670) — see queueEmail.
     scheduled_at: null,
@@ -806,7 +1512,7 @@ async function cancelEmail(emailId, adminId = null) {
 async function retryEmail(emailId, adminId = null) {
   const row = await db('email_queue').where({ id: emailId }).first();
   if (!row) throw new AppError('Email not found', 404);
-  assertResendable(row);
+  await assertResendable(row);
   await db('email_queue').where({ id: emailId })
     .update({ status: pendingStatusFor(row), retry_count: 0, error_message: null, scheduled_at: null });
   await logEmailAction('project_email_retried', emailId, row, adminId);
@@ -816,7 +1522,7 @@ async function retryEmail(emailId, adminId = null) {
 async function sendEmailNow(emailId, adminId = null) {
   const row = await db('email_queue').where({ id: emailId }).first();
   if (!row) throw new AppError('Email not found', 404);
-  assertResendable(row);
+  await assertResendable(row);
   await db('email_queue').where({ id: emailId }).update({ status: pendingStatusFor(row), scheduled_at: null });
   // Flush ONLY this email — passing onlyId scopes processEmailQueue to a single
   // row so a forced "send now" never force-retries OTHER dead-lettered emails
@@ -828,13 +1534,28 @@ async function sendEmailNow(emailId, adminId = null) {
 }
 
 module.exports = {
+  PROJECT_STATUSES,
+  PROJECT_FLOWS,
+  SKIPPABLE_STAGES,
   listProjects,
   getProjectById,
   createProject,
   updateProject,
+  deleteProject,
+  deriveStages,
+  promoteInquiry,
+  carriedProjectId,
+  holdProjectToCustomer,
+  releaseAdoptedCustomer,
   assignEvent,
   assignQuote,
   assignContract,
+  assignInvoice,
+  unassignInvoice,
+  invoiceAttachRefusal,
+  documentAttachMoves,
+  attachMovesFor,
+  dealProjectElsewhere,
   linkDealToProject,
   computeValuation,
   getProjectOverview,

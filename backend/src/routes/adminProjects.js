@@ -9,7 +9,7 @@
  */
 
 const express = require('express');
-const { body, param } = require('express-validator');
+const { body, param, query } = require('express-validator');
 const { adminAuth } = require('../middleware/auth');
 const { requirePermission, userHasAnyPermission } = require('../middleware/permissions');
 const { handleAsync, validateRequest, successResponse } = require('../utils/routeHelpers');
@@ -18,6 +18,8 @@ const customerGroupsService = require('../services/customerGroupsService');
 const { db } = require('../database/db');
 const { ownedProjectsSubquery, requireProjectOwnership, filterOwnedEventIds } = require('../middleware/ownership');
 const { ForbiddenError } = require('../utils/errors');
+const { hasColumnCached } = require('../utils/schemaCache');
+const { withTrustedCrmAccess } = require('../database/crmAccess');
 
 const router = express.Router();
 
@@ -64,6 +66,7 @@ function withoutCustomer(project) {
   const copy = { ...project };
   delete copy.customerAccountId;
   delete copy.customerEmail;
+  delete copy.customerBillingCadence;
   return copy;
 }
 
@@ -83,8 +86,49 @@ async function requireProjectsFlag(req, res, next) {
 }
 router.use(requireProjectsFlag);
 
+// Where an inquiry came from. Keys only; the UI translates them.
+const INQUIRY_SOURCES = ['referral', 'website', 'social', 'returning', 'fair', 'other'];
+
+// The inquiry fields (migration 315). null clears a field and skips the check;
+// any other value, false and '' included, has to pass it. Arrays are refused:
+// express-validator would check each item, and the joined value is stored.
+const optionalField = (name) => body(name).optional({ values: 'null' }).not().isArray();
+const inquiryValidators = [
+  optionalField('eventType').isString().trim().isLength({ max: 50 }),
+  optionalField('eventDate').isISO8601({ strict: true }),
+  optionalField('eventEndDate').isISO8601({ strict: true }).custom((end, { req }) => {
+    if (req.body.eventDate && String(end) < String(req.body.eventDate)) {
+      throw new Error('The end date is before the start date');
+    }
+    return true;
+  }),
+  optionalField('location').isString().trim().isLength({ max: 255 }),
+  optionalField('guestCount').isInt({ min: 0, max: 100000 }),
+  optionalField('budgetMinor').isInt({ min: 0, max: 100000000000 }),
+  optionalField('currency').isString().trim().isLength({ min: 3, max: 3 }).isAlpha(),
+  optionalField('source').isIn(INQUIRY_SOURCES),
+  optionalField('notes').isString().isLength({ max: 10000 }),
+  optionalField('flow').isIn(Object.keys(projectService.PROJECT_FLOWS)),
+  body('skippedStages').optional({ values: 'null' }).isArray({ max: projectService.SKIPPABLE_STAGES.length }),
+  body('skippedStages.*').isIn(projectService.SKIPPABLE_STAGES),
+  // `reopen` (PUT only): the server picks inquiry or active, because it sees
+  // documents the caller's overview may not show.
+  body('status').optional().not().isArray().isIn([...projectService.PROJECT_STATUSES, 'reopen']),
+];
+
+const INQUIRY_KEYS = ['flow', 'skippedStages', 'eventType', 'eventDate', 'eventEndDate', 'location', 'guestCount',
+  'budgetMinor', 'currency', 'source', 'notes'];
+const inquiryFields = (reqBody) => Object.fromEntries(
+  INQUIRY_KEYS.filter((k) => reqBody[k] !== undefined).map((k) => [k, reqBody[k]]),
+);
+
 // List
-router.get('/', requirePermission('events.view'), handleAsync(async (req, res) => {
+router.get('/', requirePermission('events.view'), [
+  // A comma list (`inquiry,active`) for the dashboard, or one status.
+  query('status').optional().isString().isLength({ max: 200 }),
+  query('withStages').optional().isIn(['0', '1', 'true', 'false']),
+], handleAsync(async (req, res) => {
+  validateRequest(req);
   // Value rollup mirrors the cockpit's per-doc gating so the list never
   // shows figures the admin lacks permission to see. Only invoices + quotes
   // carry monetary totals; contracts contribute none, so (unlike the detail
@@ -98,11 +142,19 @@ router.get('/', requirePermission('events.view'), handleAsync(async (req, res) =
   // project count can't hit the driver's bind-parameter limit; null means
   // unrestricted.
   const projectIds = ownedProjectsSubquery(req.admin);
+  const asked = String(req.query.status || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const statuses = asked.filter((x) => projectService.PROJECT_STATUSES.includes(x));
+  // A filter asked for with no status that exists matches no project, as an
+  // unknown value did before; it is not "no filter".
+  if (asked.length && !statuses.length) return successResponse(res, { projects: [] });
+  const withStages = req.query.withStages === '1' || req.query.withStages === 'true';
+  if (withStages) perms.contracts = await userHasAnyPermission(req.admin.id, ['contracts.view']);
   const projects = await projectService.listProjects({
     search: req.query.q || '',
-    status: req.query.status || null,
+    status: statuses.length > 1 ? statuses : (statuses[0] || null),
     perms,
     projectIds,
+    withStages,
   });
   const visible = (await mayViewCustomers(req)) ? projects : projects.map(withoutCustomer);
   return successResponse(res, { projects: visible });
@@ -111,12 +163,21 @@ router.get('/', requirePermission('events.view'), handleAsync(async (req, res) =
 // Create
 router.post('/',
   requirePermission('events.edit'),
-  [body('name').isString().trim().isLength({ min: 1, max: 255 }), body('customerAccountId').optional({ values: 'falsy' }).isInt({ min: 1 })],
+  [
+    body('name').isString().trim().isLength({ min: 1, max: 255 }),
+    body('customerAccountId').optional({ values: 'falsy' }).isInt({ min: 1 }),
+    ...inquiryValidators,
+  ],
   handleAsync(async (req, res) => {
     validateRequest(req);
     await assertMayLinkCustomer(req);
     const project = await projectService.createProject(
-      { name: req.body.name, customerAccountId: req.body.customerAccountId || null },
+      {
+        name: req.body.name,
+        customerAccountId: req.body.customerAccountId || null,
+        status: req.body.status || 'active',
+        ...inquiryFields(req.body),
+      },
       req.admin.id,
     );
     return successResponse(res, { project: await projectForCaller(req, project) }, 201, 'Project created');
@@ -140,7 +201,7 @@ router.put('/:id',
     body('name').optional().isString().trim().isLength({ min: 1, max: 255 }),
     // nullable:true → accept JSON `null` (clear the customer); isInt otherwise.
     body('customerAccountId').optional({ nullable: true }).isInt({ min: 1 }),
-    body('status').optional().isString().isLength({ max: 24 }),
+    ...inquiryValidators,
   ],
   handleAsync(async (req, res) => {
     validateRequest(req);
@@ -149,8 +210,63 @@ router.put('/:id',
       name: req.body.name,
       customerAccountId: req.body.customerAccountId,
       status: req.body.status,
+      ...inquiryFields(req.body),
     });
     return successResponse(res, { project: await projectForCaller(req, project) }, 200, 'Project updated');
+  }),
+);
+
+// Delete. The project's galleries, quotes, contracts, invoices and hours stay;
+// they only lose the link (projectService.deleteProject). Clearing a link is a
+// write on that record, so it needs what attaching or editing one needs: the
+// manage permission of each domain the project holds (as POST /:id/quotes and
+// /:id/contracts; hours and customer documents as their own routes), every
+// linked document being the caller's, and ownership of every linked gallery
+// (as POST /:id/events), which a super admin may have put into this project.
+router.delete('/:id',
+  requirePermission('events.edit'),
+  requireProjectOwnership,
+  [param('id').isInt({ min: 1 })],
+  handleAsync(async (req, res) => {
+    validateRequest(req);
+    const id = parseInt(req.params.id, 10);
+    // Counted twice: unscoped, to see every linked record, and as the caller,
+    // through the CRM access layer (auth.js withCrmActor), to see which of
+    // them are theirs. A plain read here only ever sees the caller's own
+    // documents, so it would let a delete through that unlinks someone else's.
+    const count = async (query) => Number((await query.count('* as c').first())?.c || 0);
+    const needs = [];
+    let foreign = false;
+    // What was checked, so the delete can refuse when something was linked
+    // after this census (projectService.deleteProject recounts in its transaction).
+    const checked = { ids: {}, eventIds: [] };
+    for (const [table, perm] of [
+      ['quotes', 'quotes.manage'], ['contracts', 'contracts.manage'], ['invoices', 'bills.manage'],
+      ['customer_hour_entries', 'customers.edit'], ['customer_documents', 'customers.documents.manage'],
+    ]) {
+      if (!(await hasColumnCached(table, 'project_id'))) continue;
+      const linkedIds = await withTrustedCrmAccess('project delete: linked-record census',
+        () => db(table).where({ project_id: id }).pluck('id'));
+      checked.ids[table] = linkedIds;
+      const linked = linkedIds.length;
+      if (!linked) continue;
+      if (!(await userHasAnyPermission(req.admin.id, [perm]))) { needs.push(perm); continue; }
+      if (await count(db(table).where({ project_id: id })) < linked) foreign = true;
+    }
+    if (needs.length) {
+      return res.status(403).json({ error: `This project holds records you cannot change; ${needs.join(', ')} is required to delete it`, code: 'PROJECT_DELETE_NEEDS_PERMISSION', permissions: needs });
+    }
+    if (foreign) {
+      return res.status(403).json({ error: 'This project holds documents that are not yours; they have to be moved out before it can be deleted', code: 'PROJECT_DELETE_FOREIGN_DOCUMENTS' });
+    }
+    const eventIds = (await db('events').where({ project_id: id }).select('id')).map((e) => e.id);
+    const { denied } = await filterOwnedEventIds(req.admin, eventIds);
+    if (denied.length) {
+      return res.status(403).json({ error: 'This project holds galleries that are not yours; they have to be moved out before it can be deleted', code: 'PROJECT_DELETE_FOREIGN_GALLERIES' });
+    }
+    checked.eventIds = eventIds;
+    const result = await projectService.deleteProject(id, req.admin, { checked });
+    return successResponse(res, result, 200, 'Project deleted');
   }),
 );
 
@@ -203,6 +319,43 @@ router.post('/:id/contracts',
     await assertCascadePermitted(req, 'contracts', contractId, 'quotes', 'quotes.manage');
     const result = await projectService.assignContract(parseInt(req.params.id, 10), contractId, req.admin);
     return successResponse(res, result, 200, 'Contract attached to project');
+  }),
+);
+
+// Attach an existing invoice to the project (a finished job set up after the
+// fact). bills.manage in addition to events.edit, as for quotes and contracts
+// (GHSA-v4vw). The invoice is read through the CRM access layer, so another
+// admin's answers 404; its gallery, which comes along, must be the caller's.
+router.post('/:id/invoices',
+  requirePermission(['events.edit', 'bills.manage'], { requireAll: true }),
+  requireProjectOwnership,
+  [param('id').isInt({ min: 1 }), body('invoiceId').isInt({ min: 1 })],
+  handleAsync(async (req, res) => {
+    validateRequest(req);
+    const invoiceId = parseInt(req.body.invoiceId, 10);
+    const inv = await db('invoices').where({ id: invoiceId }).first('event_id');
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (inv.event_id) {
+      const { denied } = await filterOwnedEventIds(req.admin, [inv.event_id]);
+      if (denied.length) return res.status(403).json({ error: 'That invoice’s gallery is not yours to attach' });
+    }
+    await assertCascadePermitted(req, 'invoices', invoiceId, 'quotes', 'quotes.manage');
+    await assertCascadePermitted(req, 'invoices', invoiceId, 'contracts', 'contracts.manage');
+    const result = await projectService.assignInvoice(parseInt(req.params.id, 10), invoiceId, req.admin);
+    return successResponse(res, result, 200, 'Invoice attached to project');
+  }),
+);
+
+// Take an invoice back out of the project (it was created in or attached to
+// it). The same guards as attaching it.
+router.delete('/:id/invoices/:invoiceId',
+  requirePermission(['events.edit', 'bills.manage'], { requireAll: true }),
+  requireProjectOwnership,
+  [param('id').isInt({ min: 1 }), param('invoiceId').isInt({ min: 1 })],
+  handleAsync(async (req, res) => {
+    validateRequest(req);
+    const result = await projectService.unassignInvoice(parseInt(req.params.id, 10), parseInt(req.params.invoiceId, 10), req.admin);
+    return successResponse(res, result, 200, 'Invoice taken out of the project');
   }),
 );
 

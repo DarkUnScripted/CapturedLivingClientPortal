@@ -33,8 +33,16 @@ const {
   dropExternalRelpathIndex,
 } = require('./externalPhotoDedupe');
 const {
+  ratingIndexesSupported,
+  dedupeRatings,
+  createRatingIndexes,
+  dropRatingIndexes,
+  backfillCommentCounts,
+} = require('./feedbackIntegrity');
+const {
   hardenAccountRecoveryStorage,
   installAccountRecoveryWriteGuards,
+  protectQueuedPasswords,
   removeAccountRecoveryWriteGuards,
 } = require('./accountRecoveryStorageHardening');
 
@@ -238,6 +246,37 @@ async function reinjectCurrentAdmin(trx, currentAdmin) {
     await trx('admin_users').insert(snapshot);
     return snapshot.id;
   }
+}
+
+// The operator's passkeys (migration 295) are login credentials like the
+// password and the TOTP secret above, but live in their own table, which the
+// restore replaces with the archive's rows. Left alone, the operator would lose
+// their own keys, and any archived key attached to the account the operator
+// ends up on could sign in as them without the password or the second factor.
+// captureOperatorPasskeys() reads the rows before the wipe;
+// preserveOperatorPasskeys() makes them the only keys of the operator's row.
+const PASSKEY_TABLE = 'admin_webauthn_credentials';
+
+async function captureOperatorPasskeys(executor, adminId) {
+  if (!adminId || !(await executor.schema.hasTable(PASSKEY_TABLE))) return [];
+  return executor(PASSKEY_TABLE).where({ admin_user_id: adminId }).orderBy('id');
+}
+
+async function preserveOperatorPasskeys(trx, operatorId, passkeys) {
+  if (!operatorId || !(await trx.schema.hasTable(PASSKEY_TABLE))) return;
+  // Every archived key on the operator's row goes, whether the row came from
+  // the archive or is new: FK checks are suspended during the load, so the
+  // archive can carry keys for an id it holds no account for.
+  await trx(PASSKEY_TABLE).where({ admin_user_id: operatorId }).del();
+  if (!passkeys || !passkeys.length) return;
+  // credential_id is unique. An archived row claiming one of the operator's
+  // credential ids for another account loses to the operator's own.
+  await trx(PASSKEY_TABLE).whereIn('credential_id', passkeys.map((row) => row.credential_id)).del();
+  // Explicit ids, for the reason reinjectCurrentAdmin gives: batchInsert left
+  // the Postgres sequence unadvanced.
+  const maxRow = await trx(PASSKEY_TABLE).max({ m: 'id' }).first();
+  let nextId = Number(maxRow && maxRow.m) || 0;
+  await trx(PASSKEY_TABLE).insert(passkeys.map((row) => ({ ...row, id: ++nextId, admin_user_id: operatorId })));
 }
 
 // Capture the operator's role and its granted permission NAMES before the wipe,
@@ -534,6 +573,10 @@ async function replaceAllTables(tables, dataDir, currentAdmin, roleSnapshot, { c
       hadRelpathIndex = true;
       await dropExternalRelpathIndex(trx);
     }
+    // Same for the one-rating-per-guest indexes (issue 2075): a backup taken
+    // before migration 309 can carry the duplicate ratings it collapses.
+    const hadRatingIndexes = await ratingIndexesSupported(trx);
+    if (hadRatingIndexes) await dropRatingIndexes(trx);
 
     // Clear every table the CURRENT schema exports (`allTables`), not just
     // the tables this archive's manifest lists (`tables`, a subset of it).
@@ -556,6 +599,8 @@ async function replaceAllTables(tables, dataDir, currentAdmin, roleSnapshot, { c
     // the reinsert loop below replaces it with the archive's rows, and
     // skipping the clear would leave stale local rows colliding with the
     // reinserted ones on unique constraints (e.g. ledger_accounts.number).
+    const operatorPasskeys = await captureOperatorPasskeys(trx, currentAdmin && currentAdmin.id);
+
     const manifestTableSet = new Set(tables);
     const tablesToClear = new Set(allTables || tables);
     // Download limit grants (issue 1560) too: an archive made before they
@@ -586,6 +631,12 @@ async function replaceAllTables(tables, dataDir, currentAdmin, roleSnapshot, { c
       }
     }
 
+    // An archive made before migration 311 carries no rendition_version, and
+    // its photos would take the column default (1, "already stripped") while
+    // the renditions restored with them still carry the source's EXIF (issue
+    // 2096). Such rows come back as 0, so the background refresh cleans them.
+    const markLegacyRenditions = tables.includes('photos') && await trx.schema.hasColumn('photos', 'rendition_version');
+
     for (const table of tables) {
       const jsonCols = await jsonColumnsFor(trx, table);
       const types = crossEngine ? await typedColumnsFor(trx, table) : null;
@@ -596,6 +647,9 @@ async function replaceAllTables(tables, dataDir, currentAdmin, roleSnapshot, { c
         prepared = serialiseJsonColumns(prepared, crossEngine ? new Set() : jsonCols);
         prepared = relocateStoredPaths(table, prepared, path.join(path.dirname(dataDir), 'files'));
         assertContainedPaths(table, prepared);
+        if (table === 'photos' && markLegacyRenditions) {
+          prepared = prepared.map((row) => (row.rendition_version === undefined ? { ...row, rendition_version: 0 } : row));
+        }
         await trx.batchInsert(table, prepared, prepared.length);
       }
       // Archived queue rows come back as they were, text timestamps included,
@@ -621,13 +675,26 @@ async function replaceAllTables(tables, dataDir, currentAdmin, roleSnapshot, { c
       }
       await createExternalRelpathIndex(trx);
     }
+    if (hadRatingIndexes) {
+      const removed = await dedupeRatings(trx);
+      if (removed) {
+        logger.info(`picpeakImport: removed ${removed} duplicate rating row(s) from the archive (issue 2075)`);
+      }
+      await createRatingIndexes(trx);
+    }
+    // An archive taken before migration 309 carries the comment_count zeros
+    // that migration backfills (issue 2071); a newer one's counts recount to
+    // the same values.
+    await backfillCommentCounts(trx);
 
     const operatorId = await reinjectCurrentAdmin(trx, currentAdmin);
     if (operatorId && roleSnapshot) {
       await preserveOperatorRole(trx, operatorId, roleSnapshot);
     }
+    await preserveOperatorPasskeys(trx, operatorId, operatorPasskeys);
 
     await hardenAccountRecoveryStorage(trx);
+    await protectQueuedPasswords(trx);
     await installAccountRecoveryWriteGuards(trx);
 
     // Reset the pg session flag BEFORE the connection returns to the pool.
@@ -706,6 +773,8 @@ module.exports = {
   reinjectCurrentAdmin,
   captureOperatorRole,
   preserveOperatorRole,
+  captureOperatorPasskeys,
+  preserveOperatorPasskeys,
   resyncSequences,
   SEED_ONLY_TABLES,
 };

@@ -206,13 +206,62 @@ test('a restart reclaims authenticated requests and resumable sessions by their 
   await expect(quota.begin({ eventId, mode: 'admin', maxFiles: 1, declaredBytes: 10 })).rejects.toMatchObject({ code: 'UPLOAD_CONCURRENCY_LIMIT' });
   await quota.cleanupAbandoned();
   expect(await db('public_upload_requests').where({ id }).first()).toMatchObject({ active: 0, bytes: 0 });
-  expect(await db('public_upload_objects')).toHaveLength(0); expect(fs.existsSync(dir)).toBe(false);
+  expect(fs.existsSync(dir)).toBe(false);
+  // Its half promotion goes once maintenance has deleted the stored object.
+  expect(await db('public_upload_objects').first()).toMatchObject({ state: 'uncertain' });
+  await quota.retryRetainedObjects();
+  // Kept while a stalled process could still write it, then left as a tombstone.
+  expect(await db('public_upload_objects').first()).toMatchObject({ state: 'discarded' });
+  await db('public_upload_objects').update({ created_at: new Date(Date.now() - quota.LATE_WRITE_MS - 60000).toISOString() });
+  await quota.retryRetainedObjects();
+  expect(await db('public_upload_objects').first()).toMatchObject({ state: 'deleted' });
+  await db('public_upload_objects').del();
   // A live session is kept by this process's heartbeat however old its row.
   const init = await initChunk(jpeg.length);
   await db('public_upload_requests').where({ active: 1 }).update({ heartbeat_at: Date.now() - quota.STALE_MS - 1000 });
   await quota.heartbeat(); await quota.cleanupAbandoned();
   expect(Number((await db('public_upload_requests').where({ active: 1 }).first()).heartbeat_at)).toBeGreaterThan(Date.now() - 5000);
   expect((await sendChunk(init.body.uploadId, jpeg)).status).toBe(200);
+});
+test('a crashed upload\'s stored file is deleted before its record, and a record whose file stays is kept', async () => {
+  const orphan = async name => {
+    const id = crypto.randomUUID(); const key = `events/active/admin-admission/${name}`;
+    await db('public_upload_requests').insert({ id, event_id: eventId, account_id: 1, bytes: 4096, files: 1, rate_bytes: 0, active: 1,
+      host: 'gone', pid: process.pid, upload_kind: 'admin', heartbeat_at: Date.now() - quota.STALE_MS - 1000, created_at: new Date().toISOString() });
+    await db('public_upload_objects').insert({ id: crypto.randomUUID(), request_id: id, object_key: key, bytes: jpeg.length, files: 1,
+      event_id: eventId, upload_kind: 'admin', created_at: new Date().toISOString() });
+    const file = path.join(process.env.STORAGE_PATH, key);
+    fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, jpeg);
+    return { key, file };
+  };
+  const crashed = await orphan('crashed.jpg');
+  // The reaper runs on the upload path: it releases the lease and keeps the record.
+  await quota.cleanupAbandoned();
+  expect(await db('public_upload_requests').where({ active: 1 })).toHaveLength(0);
+  expect(fs.existsSync(crashed.file)).toBe(true); expect(await quota.unfinishedKeys([crashed.key])).toEqual(new Set([crashed.key]));
+  await quota.retryRetainedObjects();
+  expect(fs.existsSync(crashed.file)).toBe(false);
+  expect(await db('public_upload_objects').where({ object_key: crashed.key }).first()).toMatchObject({ state: 'discarded' });
+  await db('public_upload_objects').del();
+  // A file that cannot be removed stays marked unfinished, so no watcher scan imports it.
+  const stuck = await orphan('stuck.jpg');
+  await quota.cleanupAbandoned();
+  jest.spyOn(storage, 'delete').mockRejectedValueOnce(Object.assign(new Error('owned EACCES'), { code: 'EACCES' }));
+  await quota.retryRetainedObjects();
+  expect(fs.existsSync(stuck.file)).toBe(true);
+  expect(await quota.unfinishedKeys([stuck.key])).toEqual(new Set([stuck.key]));
+  // Its bytes are on disk already: free space shows them, headroom must not count them again.
+  disk(2 * GiB); await db('public_upload_objects').update({ bytes: GiB });
+  await quota.finish(await quota.begin({ eventId, mode: 'admin', maxFiles: 1, declaredBytes: 1024 * 1024 }));
+  // A promotion in flight still needs its room.
+  await db('public_upload_objects').update({ state: 'promoting' });
+  await expect(quota.begin({ eventId, mode: 'admin', maxFiles: 1, declaredBytes: 1024 * 1024 })).rejects.toMatchObject({ code: 'UPLOAD_STORAGE_LOW' });
+  await db('public_upload_objects').update({ state: 'uncertain' });
+  await quota.retryRetainedObjects();
+  expect(fs.existsSync(stuck.file)).toBe(false);
+  await db('public_upload_objects').update({ created_at: new Date(Date.now() - quota.LATE_WRITE_MS - 60000).toISOString() });
+  await quota.retryRetainedObjects();
+  expect(await db('public_upload_objects').first()).toMatchObject({ state: 'deleted' });
 });
 test('an abandoned resumable session releases its slot after fifteen idle minutes, not twenty-four hours', async () => {
   process.env.ADMIN_UPLOAD_LIMITS_JSON = '{"requests":1}';
@@ -558,6 +607,90 @@ test('v1 replacement keeps identity/source filename and charges nothing', async 
   expect(res.body.photo).toMatchObject({ id: first.body.id, original_filename: 'edited.jpg', source_filename: 'camera.jpg' });
   expect(await db('photos')).toHaveLength(1);
   expect(await db('public_upload_objects')).toHaveLength(0);
+});
+// Lightroom plugin issue 8: v1 takes a video under the admin upload's gate.
+const attachV1Video = (req, bytes = admissionVideo(), filename = 'clip.mp4') => req.attach('photo', bytes, { filename, contentType: 'video/mp4' });
+test('v1 stores an enabled video as a pending video row, like the admin upload', async () => {
+  const video = admissionVideo(2 * 1024 * 1024);
+  const res = await attachV1Video(v1Upload(), video);
+  expect(res.status).toBe(201);
+  expect(res.body).toMatchObject({ size_bytes: video.length, thumbnail_path: null, media_type: 'video' });
+  expect(await db('photos').where({ id: res.body.id }).first())
+    .toMatchObject({ media_type: 'video', mime_type: 'video/mp4', processing_status: 'pending', size_bytes: video.length, thumbnail_path: null });
+  expect(await storage.stat('events/active/' + res.body.path)).toMatchObject({ size: video.length });
+});
+test('v1 refuses a video whose type the admin has not enabled', async () => {
+  await setting('general_allowed_file_types', 'jpg,jpeg,png,webp'); settings.clearAllowedTypesCache();
+  const res = await attachV1Video(v1Upload());
+  expect(res.status).toBe(400); expect(res.body.error).toBe('This file type is not enabled on this server');
+  await waitSettled(); expect(storage.putFromFile).not.toHaveBeenCalled(); expect(await db('photos')).toHaveLength(0);
+});
+test('v1 holds a video to the video cap and an image to the photo cap', async () => {
+  await setting('general_max_video_size_mb', 1); settings.clearMaxVideoSizeCache();
+  const video = await attachV1Video(v1Upload(), admissionVideo(2 * 1024 * 1024));
+  expect(video.status).toBe(400); expect(video.body.error).toBe('File too large. Maximum size is 1 MB per file.');
+  // The video cap is the larger one here, so multer's own limit answers.
+  await setting('general_max_file_size_mb', 1); await setting('general_max_video_size_mb', 2);
+  settings.clearMaxFileSizeCache(); settings.clearMaxVideoSizeCache();
+  const larger = await attachV1Video(v1Upload(), admissionVideo(3 * 1024 * 1024));
+  expect(larger.status).toBe(400); expect(larger.body.error).toBe('File too large. Maximum size is 2 MB per file.');
+  const photo = await attachV1(v1Upload(), image(1536 * 1024));
+  expect(photo.status).toBe(400); expect(photo.body.error).toBe('File too large. Maximum size is 1 MB per file.');
+  await waitSettled(); expect(storage.putFromFile).not.toHaveBeenCalled(); expect(await db('photos')).toHaveLength(0);
+});
+test('v1 refuses bytes that are not the declared video type', async () => {
+  const fake = Buffer.concat([Buffer.from('not-a-video-header!!'), Buffer.alloc(4096)]);
+  const res = await attachV1Video(v1Upload(), fake, 'fake.mp4');
+  expect(res.status).toBe(400); expect(res.body.code).toBe('UPLOAD_TYPE_REJECTED');
+  await waitSettled(); expect(storage.putFromFile).not.toHaveBeenCalled(); expect(await db('photos')).toHaveLength(0);
+});
+test('v1 replaces a video only with a video and an image only with an image', async () => {
+  const photo = await attachV1(v1Upload(), jpeg, 'camera.jpg'); expect(photo.status).toBe(201);
+  const video = await attachV1Video(v1Upload()); expect(video.status).toBe(201);
+  const byVideo = await attachV1Video(v1Upload().field('replaces_photo_id', String(photo.body.id)));
+  expect(byVideo.status).toBe(400); expect(byVideo.body.error).toBe('A video can only replace a video');
+  const byImage = await attachV1(v1Upload().field('replaces_photo_id', String(video.body.id)), jpeg, 'edited.jpg');
+  expect(byImage.status).toBe(400); expect(byImage.body.error).toBe('An image can only replace an image');
+  expect(await db('photos').where({ id: photo.body.id }).first()).toMatchObject({ media_type: 'image', original_filename: 'camera.jpg' });
+  expect(await db('photos').where({ id: video.body.id }).first()).toMatchObject({ media_type: 'video', original_filename: 'clip.mp4' });
+  const sameType = await attachV1Video(v1Upload().field('replaces_photo_id', String(video.body.id)), admissionVideo(), 'recut.mp4');
+  expect(sameType.status).toBe(200); expect(sameType.body.photo).toMatchObject({ id: video.body.id, original_filename: 'recut.mp4' });
+  // A replaced video gets a poster from ffmpeg (or the placeholder), never
+  // none: a video row without a thumbnail makes the grid fetch the original.
+  const recut = await db('photos').where({ id: video.body.id }).first();
+  expect(recut.thumbnail_path).toMatch(/^thumbnails\/thumb_.+\.jpg$/);
+  expect(await storage.exists(recut.thumbnail_path)).toBe(true);
+  expect(await db('photos')).toHaveLength(2);
+});
+test('v1 replaces an image whose row carries no mime_type, as a restored archive leaves it', async () => {
+  const photo = await attachV1(v1Upload(), jpeg, 'camera.jpg'); expect(photo.status).toBe(201);
+  await db('photos').where({ id: photo.body.id }).update({ mime_type: null });
+  const res = await attachV1(v1Upload().field('replaces_photo_id', String(photo.body.id)), jpeg, 'edited.jpg');
+  expect(res.status).toBe(200); expect(res.body.photo).toMatchObject({ id: photo.body.id, original_filename: 'edited.jpg' });
+});
+test('a replaced video that gets the placeholder tile carries the note the admin grid shows', async () => {
+  const video = await attachV1Video(v1Upload()); expect(video.status).toBe(201);
+  // The one-frame fixture gives ffmpeg no frame to seek to, so the poster is the placeholder.
+  const res = await attachV1Video(v1Upload().field('replaces_photo_id', String(video.body.id)), admissionVideo(), 'recut.mp4');
+  expect(res.status).toBe(200);
+  const recut = await db('photos').where({ id: video.body.id }).first();
+  expect(recut.processing_error).toMatch(/^No poster frame/);
+  expect(await storage.exists(recut.thumbnail_path)).toBe(true);
+});
+test('v1 keeps the old video when no poster can be stored for its replacement', async () => {
+  const video = await attachV1Video(v1Upload()); expect(video.status).toBe(201);
+  storage.putFromFile.mockRestore();
+  const actualPutFromFile = storage.putFromFile.bind(storage);
+  const refuseThumbnails = actual => async (key, ...rest) => {
+    if (String(key).startsWith('thumbnails/')) throw Object.assign(new Error('thumbnail EACCES'), { code: 'EACCES' });
+    return actual(key, ...rest);
+  };
+  jest.spyOn(storage, 'putFromFile').mockImplementation(refuseThumbnails(actualPutFromFile));
+  jest.spyOn(storage, 'put').mockImplementation(refuseThumbnails(storage.put.bind(storage)));
+  const res = await attachV1Video(v1Upload().field('replaces_photo_id', String(video.body.id)), admissionVideo(), 'recut.mp4');
+  expect(res.status).toBe(500);
+  expect(await db('photos').where({ id: video.body.id }).first()).toMatchObject({ original_filename: 'clip.mp4', path: video.body.path });
+  expect(await storage.exists('events/active/' + video.body.path)).toBe(true);
 });
 test('a typed session token cannot enter the v1 adapter or create a private reservation', async () => {
   const res = await request(app).post(`/api/v1/events/${eventId}/photos`).set('Authorization', `Bearer ${token}`).attach('photo', jpeg, 'wrong-auth.jpg');

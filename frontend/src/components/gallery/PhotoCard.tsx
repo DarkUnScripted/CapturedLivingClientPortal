@@ -1,17 +1,24 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Download, Maximize2, Check, MessageSquare, Heart } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
+import { Download, Maximize2, Check, MessageSquare, Heart, Loader2 } from 'lucide-react';
 import { useInView } from 'react-intersection-observer';
 import { AuthenticatedImage } from '../common';
 import { thumbnailUrlForTile } from './imageTiers';
+import { TileImage } from './TileImage';
 import { FeedbackIdentityModal } from './FeedbackIdentityModal';
 import { feedbackService } from '../../services/feedback.service';
+import { feedbackLockKind } from '../../utils/feedbackLock';
 import { ColorLabelBadge } from './ColorLabelBadge';
 import { TileRating } from './TileRating';
 import { FirstLookBadge, FolderHintPill } from './GalleryTileBadges';
+import { usePhotoLabels } from './PhotoLabels';
 import { useGuestIdentityOptional } from '../../contexts/GuestIdentityContext';
 import { useDownloadQuota } from '../../contexts/DownloadQuotaContext';
 import { downloadLimitReachedMessage } from '../../utils/downloadLimit';
 import { useInputMode } from '../../hooks/useInputMode';
+import { usePhotoDownloadPending, preparingDownloadMessage } from '../../hooks/usePhotoDownloadPending';
+import { useGridDensity } from './gridDensity';
 import type { Photo } from '../../types';
 
 export /** Action buttons (36px) + gap + rating pill (28px); below this the row would overlap the buttons. */
@@ -93,6 +100,14 @@ export interface PhotoCardProps {
    * layout that keeps its own chips in that corner lifts it above them.
    */
   firstLookClassName?: string;
+  /**
+   * A control that takes the tile's top-left corner: the client's visibility
+   * toggle (issue 1992). The colour-label dots, which own that corner
+   * otherwise, line up to its right in one row, followed by `topLeftExtras`.
+   */
+  topLeftControl?: React.ReactNode;
+  /** Rendered last in the `topLeftControl` row (Masonry's count chips). */
+  topLeftExtras?: React.ReactNode;
 }
 
 export const PhotoCard: React.FC<PhotoCardProps> = ({
@@ -132,6 +147,8 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
   afterOverlay,
   children,
   firstLookClassName = 'bottom-2 left-2',
+  topLeftControl,
+  topLeftExtras,
 }) => {
   const guestIdentity = useGuestIdentityOptional();
   // Download limit (issue 1560): shown as unavailable once nothing is left.
@@ -139,10 +156,14 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
   // handler (which explains the refusal) instead of falling through to the
   // tile and opening the lightbox.
   const withinDownloadLimit = useDownloadQuota().canDownload(photo);
+  // Issue 2043: while this photo's download is being prepared the button
+  // spins, and the overlay stays up so a touch user sees it.
+  const downloadPending = usePhotoDownloadPending(photo.id);
   const [overlayVisible, setOverlayVisible] = useState(false);
   // #1275 — the input in use right now, not what the device is capable of.
   // On a hybrid the two disagree, and acting on the device's primary pointer
   // handles one of its two inputs as if it were the other.
+  const { t } = useTranslation();
   const isTouchDevice = useInputMode() === 'touch';
   const overlayTimeoutRef = useRef<number | null>(null);
 
@@ -252,12 +273,30 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
     if (releases) keepBandRef(node);
   }, [loadBandRef, keepBandRef, lazy, releases]);
 
+  // A layout that hands the card its px width (Masonry rows, Flickr) also
+  // animates it (transition-all), so that target is read rather than where a
+  // running transition happens to be — after the viewer's tile-size change
+  // (issue 1733, E4), say, while the card comes into the load band.
+  const targetWidth = typeof style?.width === 'number' ? style.width : null;
   useLayoutEffect(() => {
     if (!inView || tile) return;
     // 0 means not laid out (a hidden tab, say), not a 0px tile — null falls
     // back to the viewport estimate rather than pinning the smallest tier.
-    setTile({ width: containerRef.current?.offsetWidth || null });
-  }, [inView, tile]);
+    setTile({ width: targetWidth || containerRef.current?.offsetWidth || null });
+  }, [inView, tile, targetWidth]);
+
+  // The viewer's tile size (issue 1733, E4) resizes mounted tiles in place.
+  // A tile that grew is measured again so it moves up a tier; one that shrank
+  // keeps the larger file it already has rather than fetching a smaller one.
+  const density = useGridDensity();
+  const measuredDensity = useRef(density);
+  useLayoutEffect(() => {
+    if (measuredDensity.current === density) return;
+    measuredDensity.current = density;
+    if (!tile?.width) return;
+    const width = targetWidth ?? (containerRef.current?.offsetWidth || 0);
+    if (width > tile.width) setTile({ width });
+  }, [density, tile, targetWidth]);
 
   const showFeedbackActions = feedbackEnabled && Boolean(feedbackOptions);
 
@@ -295,15 +334,20 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
   // wrong input. Withholding them on touch is what the breakpoint was really
   // for, since :hover latches on a touchscreen once a tile has been tapped.
   const revealed = (visible: boolean) => {
+    // A control reached by keyboard reveals its overlay: opacity-0 hides
+    // pixels, not focus, so Tab landed on an invisible button (issue 2074).
+    // :focus-visible, not :focus-within, so a mouse click leaves it hidden.
+    // `has-` covers the overlay (a control inside it has focus), `focus-visible:`
+    // the checkbox, which is itself the focused control.
     const base = visible
       ? 'opacity-100 pointer-events-auto'
-      : 'opacity-0 pointer-events-none';
+      : 'opacity-0 pointer-events-none has-[:focus-visible]:opacity-100 has-[:focus-visible]:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto';
     return isTouchDevice
       ? base
       : `${base} group-hover:opacity-100 group-hover:pointer-events-auto`;
   };
 
-  const overlayClassName = `${overlayBaseClassName} ${revealed(overlayVisible)}`;
+  const overlayClassName = `${overlayBaseClassName} ${revealed(overlayVisible || (downloadPending && !isSelectionMode))}`;
 
   const checkboxVisibilityClass = revealed(
     isSelected || isSelectionMode || overlayVisible,
@@ -313,7 +357,9 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
   // with the checkbox, so it steps aside whenever the checkbox shows.
   const folderHintVisibilityClass = isSelected || isSelectionMode || overlayVisible
     ? 'opacity-0'
-    : isTouchDevice ? 'opacity-100' : 'opacity-100 group-hover:opacity-0';
+    : isTouchDevice
+      ? 'opacity-100 group-has-[:focus-visible]:opacity-0'
+      : 'opacity-100 group-hover:opacity-0 group-has-[:focus-visible]:opacity-0';
 
   const buttonType = actionVariant === 'dark' ? ('button' as const) : undefined;
   const actionButtonClass =
@@ -352,7 +398,10 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
           feedback_type: 'like',
         });
       } catch (err) {
-        console.warn('Like submit failed, keeping optimistic UI', err);
+        // Refused by a finished selection (issue 1733): nothing was written,
+        // so the heart goes back. Any other failure keeps the optimistic UI.
+        if (feedbackLockKind(err)) onLikeSuccess?.();
+        else console.warn('Like submit failed, keeping optimistic UI', err);
       }
       if (onFeedbackChange) onFeedbackChange(photo.id);
       hideOverlay();
@@ -381,8 +430,10 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
         guest_email: savedIdentityValue?.email,
       });
     } catch (err) {
-      // Keep optimistic state; a refresh will reconcile
-      console.warn('Like submit failed, keeping optimistic UI', err);
+      // A locked pick goes back; otherwise keep the optimistic state, a
+      // refresh will reconcile.
+      if (feedbackLockKind(err)) onLikeSuccess?.();
+      else console.warn('Like submit failed, keeping optimistic UI', err);
     }
     if (onFeedbackChange) onFeedbackChange(photo.id);
     hideOverlay();
@@ -397,8 +448,8 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
           onQuickComment();
           hideOverlay();
         }}
-        aria-label="Comment on photo"
-        title="Comment"
+        aria-label={t('gallery.tile.commentOnPhoto', 'Comment on photo')}
+        title={t('gallery.tile.comment', 'Comment')}
       >
         <MessageSquare className={actionIconClass} />
       </button>
@@ -411,9 +462,9 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
           liked ? 'bg-danger hover:opacity-90' : 'bg-white/90 hover:bg-white'
         }`}
         onClick={handleLike}
-        aria-label={likeToggleLabels && liked ? 'Unlike photo' : 'Like photo'}
+        aria-label={likeToggleLabels && liked ? t('gallery.tile.unlikePhoto', 'Unlike photo') : t('gallery.tile.likePhoto', 'Like photo')}
         aria-pressed={liked}
-        title={likeToggleLabels ? (liked ? 'Unlike' : 'Like') : 'Like'}
+        title={likeToggleLabels && liked ? t('gallery.tile.unlike', 'Unlike') : t('gallery.tile.like', 'Like')}
       >
         <Heart className={`w-5 h-5 ${liked ? 'text-white fill-white' : 'text-neutral-800'}`} />
       </button>
@@ -464,6 +515,10 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
   const tileSrc = !isVideo && photo.thumbnail_url && imageProps.src === photo.thumbnail_url
     ? (thumbnailUrlForTile(photo.thumbnail_url, photo, tile?.width) ?? imageProps.src)
     : imageProps.src;
+  // Neutral photo labels (issue 1733, E6) replace the filename the layouts
+  // pass as alt text, and the name in the checkbox's label.
+  const photoLabels = usePhotoLabels();
+  const tileAlt = typeof imageProps.alt === 'string' ? photoLabels.of(photo, imageProps.alt) : imageProps.alt;
 
   return (
     <div
@@ -475,16 +530,42 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
     >
       {inView && tile ? (
         <>
-          <AuthenticatedImage {...imageProps} src={tileSrc} />
+          {/* Inside the mounted branch on purpose: the blurred placeholder
+              (issue 1733) is decoded only for tiles that are mounted, and
+              goes with them when the release band lets a tile go. */}
+          <TileImage {...imageProps} src={tileSrc} alt={tileAlt} thumbHash={photo.thumb_hash} />
 
           {/* The guest's own colour label (#1044) — visible without hovering
               or opening anything, which is the point: the client watches
               their selection progress across the grid. */}
-          <ColorLabelBadge
-            colorLabel={photo.my_color_label}
-            otherColorLabels={photo.other_color_labels}
-            decision={photo.my_decision}
-          />
+          {topLeftControl ? (
+            <>
+              <ColorLabelBadge
+                colorLabel={photo.my_color_label}
+                otherColorLabels={photo.other_color_labels}
+                decision={photo.my_decision}
+                part="ring"
+              />
+              {/* The toggle takes the corner; the dots sit right of it, so
+                  neither covers the other (issue 1992). */}
+              <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5">
+                {topLeftControl}
+                <ColorLabelBadge
+                  colorLabel={photo.my_color_label}
+                  otherColorLabels={photo.other_color_labels}
+                  decision={photo.my_decision}
+                  part="dots"
+                />
+                {topLeftExtras}
+              </div>
+            </>
+          ) : (
+            <ColorLabelBadge
+              colorLabel={photo.my_color_label}
+              otherColorLabels={photo.other_color_labels}
+              decision={photo.my_decision}
+            />
+          )}
 
           <FirstLookBadge photo={photo} className={firstLookClassName} />
           <FolderHintPill photo={photo} className={`top-2 right-2 ${folderHintVisibilityClass}`} />
@@ -503,7 +584,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
                     onClick(e);
                     hideOverlay();
                   }}
-                  aria-label="View full size"
+                  aria-label={t('gallery.tile.viewFullSize', 'View full size')}
                 >
                   <Maximize2 className={actionIconClass} />
                 </button>
@@ -516,12 +597,15 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
                       onDownload(e);
                       hideOverlay();
                     }}
-                    aria-label="Download photo"
-                    aria-disabled={!withinDownloadLimit || undefined}
+                    aria-label={downloadPending ? preparingDownloadMessage() : t('gallery.tile.downloadPhoto', 'Download photo')}
+                    aria-disabled={!withinDownloadLimit || downloadPending || undefined}
+                    aria-busy={downloadPending || undefined}
                     title={withinDownloadLimit ? undefined : downloadLimitReachedMessage()}
-                    style={withinDownloadLimit ? undefined : { opacity: 0.5, cursor: 'not-allowed' }}
+                    style={withinDownloadLimit ? (downloadPending ? { cursor: 'wait' } : undefined) : { opacity: 0.5, cursor: 'not-allowed' }}
                   >
-                    <Download className={actionIconClass} />
+                    {downloadPending
+                      ? <Loader2 className={`${actionIconClass} animate-spin`} aria-hidden="true" />
+                      : <Download className={actionIconClass} />}
                   </button>
                 )}
                 {likeBeforeComment ? (
@@ -540,29 +624,44 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
             )}
           </div>
 
-          {/* Identity Modal (self-managed mode) */}
-          {identityMode === 'self' && (
-            <FeedbackIdentityModal
-              isOpen={showIdentityModal}
-              onClose={() => { setShowIdentityModal(false); setPendingAction(null); }}
-              onSubmit={async (name, email) => {
-                setSelfIdentity({ name, email });
-                onIdentitySaved?.({ name, email });
-                setShowIdentityModal(false);
-                if (pendingAction) {
-                  if (pendingAction.type === 'like' && onLikeSuccess) {
-                    onLikeSuccess();
+          {/* Identity Modal (self-managed mode). Portalled to the body, as
+              TileRating's is: a tile with `content-visibility` (Masonry rows,
+              flickr, quilted) is the containing block of a `position: fixed`
+              descendant and clips it. React events still bubble through a
+              portal, so the wrapper keeps a click in the form from reaching
+              the tile and opening the photo. */}
+          {identityMode === 'self' && showIdentityModal && createPortal(
+            <div onClick={(e) => e.stopPropagation()}>
+              <FeedbackIdentityModal
+                isOpen
+                onClose={() => { setShowIdentityModal(false); setPendingAction(null); }}
+                onSubmit={async (name, email) => {
+                  setSelfIdentity({ name, email });
+                  onIdentitySaved?.({ name, email });
+                  setShowIdentityModal(false);
+                  if (pendingAction) {
+                    if (pendingAction.type === 'like' && onLikeSuccess) {
+                      onLikeSuccess();
+                    }
+                    try {
+                      await feedbackService.submitFeedback(slug!, String(pendingAction.photoId), {
+                        feedback_type: pendingAction.type,
+                        guest_name: name,
+                        guest_email: email,
+                      });
+                    } catch (err) {
+                      // Refused by a finished selection: the heart goes back.
+                      if (!feedbackLockKind(err)) throw err;
+                      if (pendingAction.type === 'like') onLikeSuccess?.();
+                    }
+                    if (onFeedbackChange) onFeedbackChange(pendingAction.photoId);
+                    setPendingAction(null);
                   }
-                  await feedbackService.submitFeedback(slug!, String(pendingAction.photoId), {
-                    feedback_type: pendingAction.type,
-                    guest_name: name,
-                    guest_email: email,
-                  });
-                  setPendingAction(null);
-                }
-              }}
-              feedbackType="like"
-            />
+                }}
+                feedbackType="like"
+              />
+            </div>,
+            document.body,
           )}
 
           {afterOverlay}
@@ -570,7 +669,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
           {/* Selection Checkbox (visible on hover or when selected) */}
           <button
             type="button"
-            aria-label={`Select ${photo.filename}`}
+            aria-label={t('gallery.tile.selectPhoto', 'Select {{name}}', { name: photoLabels.of(photo, photo.filename) })}
             role="checkbox"
             aria-checked={isSelected}
             data-testid={checkboxTestId ? `gallery-photo-checkbox-${photo.id}` : undefined}

@@ -32,6 +32,7 @@ const crypto = require('crypto');
 const path = require('path');
 const multer = require('multer');
 const { assertContractPdfPath } = require('../utils/safePath');
+const { pipeStreamToResponse } = require('../utils/streamResponse');
 const { resolveStoredPath, toStoredPath } = require('../utils/storedPath');
 const { body, header, param, query } = require('express-validator');
 const { adminAuth } = require('../middleware/auth');
@@ -120,6 +121,9 @@ function transformContract(c, inclusions, textSections, attachmentRows) {
       lastName: c.customer_last_name,
       companyName: c.customer_company_name,
       preferredLanguage: c.customer_preferred_language,
+      // No administrative emails (migration 300): the send action becomes
+      // Issue — the document is issued (in the portal when the customer has access), no mail goes out.
+      noAdminEmails: c.customer_no_admin_emails === true || c.customer_no_admin_emails === 1,
     },
     status: c.status,
     // Migration 140 — cross-document lineage UUID. See adminQuotes
@@ -338,6 +342,9 @@ router.get(
     query('sort').optional().isIn(['newest', 'oldest', 'issue_asc', 'issue_desc', 'customer_asc', 'customer_desc']),
     query('page').optional().isInt({ min: 1 }),
     query('pageSize').optional().isInt({ min: 1, max: 200 }),
+    // The project page's add window: whether attaching each contract takes
+    // anything out of another project (projectService.attachMovesFor).
+    query('attachTo').optional({ values: 'falsy' }).isInt({ min: 1 }),
   ],
   handleAsync(async (req, res) => {
     validateRequest(req);
@@ -359,10 +366,13 @@ router.get(
     // (1 of 2)" label (#1446) — derived here, never stored as a status.
     const progress = await require('../services/contract/signers')
       .customerSignerProgress(result.rows.map((row) => row.id));
+    const moves = await require('../services/projectService')
+      .attachMovesFor(req.admin, result.rows, req.query.attachTo ? parseInt(req.query.attachTo, 10) : null);
     return successResponse(res, {
-      contracts: result.rows.map((row) => ({
+      contracts: result.rows.map((row, i) => ({
         ...transformContract(row),
         signerProgress: progress.get(Number(row.id)) || null,
+        ...(moves ? { attachMoves: moves[i] } : {}),
       })),
       total: result.total,
       page: result.page,
@@ -844,7 +854,9 @@ router.get(
       'Content-Disposition',
       `inline; filename="${data.contract.contract_number}.pdf"`,
     );
-    fs.createReadStream(safePath).pipe(res);
+    // existsSync above does not close the window: the read stream opens
+    // lazily, and a file removed in between errors outside handleAsync.
+    pipeStreamToResponse(fs.createReadStream(safePath), res, { context: `contract ${data.contract.id} PDF` });
   }),
 );
 
@@ -868,7 +880,7 @@ router.get(
       'Content-Disposition',
       `inline; filename="${data.contract.contract_number}-signed.pdf"`,
     );
-    fs.createReadStream(safePath).pipe(res);
+    pipeStreamToResponse(fs.createReadStream(safePath), res, { context: `contract ${data.contract.id} signed PDF` });
   }),
 );
 

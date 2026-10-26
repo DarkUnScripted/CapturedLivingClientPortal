@@ -1,11 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { motion, useInView } from 'framer-motion';
 import { Heart, Check } from 'lucide-react';
-import { AuthenticatedImage } from '../../../common';
 import { ColorLabelBadge } from '../../ColorLabelBadge';
 import { FirstLookBadge } from '../../GalleryTileBadges';
+import { ClientVisibilityToggle, isHiddenFromGuests } from '../../ClientVisibilityToggle';
 import type { Photo } from '../../../../types';
 import { lightboxImageUrl } from '../../imageTiers';
+import { TileImage } from '../../TileImage';
+import { usePhotoLabels } from '../../PhotoLabels';
 
 interface StoryPhotoCardProps {
   photo: Photo;
@@ -30,7 +32,17 @@ interface StoryPhotoCardProps {
   onSelect?: (id: number) => void;
   /** Likes are a per-event sub-toggle (#506); the heart is not offered when they are off. */
   likesAllowed?: boolean;
+  /** The client's hide/show handler (issue 1992); set only for the client. */
+  onToggleVisibility?: (photoId: number, currentVisibility: string) => void;
+  /**
+   * The filename caption on hover: 'none' (the default), the stored
+   * `filename`, or the uploaded `original_filename` when the gallery shows
+   * original filenames (#508), as the lightbox does.
+   */
+  caption?: StoryCaptionMode;
 }
+
+export type StoryCaptionMode = 'none' | 'filename' | 'original';
 
 export const StoryPhotoCard: React.FC<StoryPhotoCardProps> = ({
   photo,
@@ -45,6 +57,8 @@ export const StoryPhotoCard: React.FC<StoryPhotoCardProps> = ({
   isSelected = false,
   onSelect,
   likesAllowed = true,
+  onToggleVisibility,
+  caption = 'none',
   galleryId: _galleryId
 }) => {
   // galleryId is kept for potential PhotoSwipe integration but not currently used
@@ -65,6 +79,15 @@ export const StoryPhotoCard: React.FC<StoryPhotoCardProps> = ({
   // flight by the time the card animates in.
   const cardRef = useRef<HTMLDivElement>(null);
   const isNearViewport = useInView(cardRef, { once: true, margin: '200px' });
+
+  // Under neutral photo labels (issue 1733, E6) the caption, alt text and
+  // checkbox name read "Photo 12 of 84" instead of a filename.
+  const photoLabels = usePhotoLabels();
+  const captionText = caption === 'none'
+    ? null
+    : photoLabels.of(photo, caption === 'original'
+      ? (photo.original_filename || photo.filename)
+      : photo.filename);
 
   return (
     <motion.div
@@ -101,14 +124,24 @@ export const StoryPhotoCard: React.FC<StoryPhotoCardProps> = ({
           }
         }}
         aria-pressed={isSelectionMode ? isSelected : undefined}
-        className="block w-full h-full"
+        // Dimmed when the client hid it from guests, as in Grid (issue 1992).
+        className={`block w-full h-full${onToggleVisibility && isHiddenFromGuests(photo) ? ' opacity-40' : ''}`}
       >
         {/* The placeholder keeps the card's box while the image is still
             out of range, so nothing reflows when it arrives. */}
         {!isNearViewport ? (
           <div className="w-full h-full bg-elevated" aria-hidden="true" />
         ) : (
-        <AuthenticatedImage
+        <TileImage
+          // Blurred placeholder (issue 1733) until the preview is in. Not for
+          // a letterboxed card: the placeholder covers the box and the photo
+          // would not. It fades over the image's own 0.7s entrance, and
+          // eases in: the image eases out underneath, so the placeholder
+          // holds while the image is still faint and the card background
+          // never shows through by more than a tenth (a plain ease let a
+          // quarter through mid-fade).
+          thumbHash={fit === 'cover' ? photo.thumb_hash : null}
+          placeholderFadeClassName="duration-700 ease-in"
           // A card tile, and it used to render the full ORIGINAL at
           // object-cover — the one place where the reporter's "hundreds of
           // megabytes for a gallery" was literally true (#1166).
@@ -121,7 +154,7 @@ export const StoryPhotoCard: React.FC<StoryPhotoCardProps> = ({
           // photo. Previews use fit:'inside' and are the whole frame, so the
           // card looks exactly as it did while no longer pulling an original.
           src={lightboxImageUrl(photo)}
-          alt={photo.filename}
+          alt={photoLabels.of(photo, photo.filename)}
           onLoad={() => setIsLoaded(true)}
           className={`w-full h-full object-cover transition-all duration-700 ease-out will-change-transform ${
             !isLoaded ? 'opacity-0 scale-110' : 'opacity-100 scale-100'
@@ -144,7 +177,10 @@ export const StoryPhotoCard: React.FC<StoryPhotoCardProps> = ({
 
       {/* First look (issue 1562). Bottom-left is free until hover, when the
           filename caption slides over it — so the pill steps aside then. */}
-      <FirstLookBadge photo={photo} className="bottom-3 left-3 transition-opacity group-hover:opacity-0" />
+      <FirstLookBadge
+        photo={photo}
+        className={`bottom-3 left-3${captionText ? ' transition-opacity group-hover:opacity-0' : ''}`}
+      />
 
       {/* Selection checkbox (issue 1716). Visible while selecting or when
           selected; outside selection mode it appears on hover and starts the
@@ -154,7 +190,7 @@ export const StoryPhotoCard: React.FC<StoryPhotoCardProps> = ({
           type="button"
           role="checkbox"
           aria-checked={isSelected}
-          aria-label={photo.original_filename || photo.filename}
+          aria-label={photoLabels.of(photo, photo.original_filename || photo.filename)}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -164,6 +200,16 @@ export const StoryPhotoCard: React.FC<StoryPhotoCardProps> = ({
         >
           {isSelected && <Check size={14} strokeWidth={3} />}
         </button>
+      )}
+
+      {/* The client's hide/show button (issue 1992). The checkbox owns this
+          card's top-left corner, so the button sits just below it. */}
+      {onToggleVisibility && (
+        <ClientVisibilityToggle
+          photo={photo}
+          onToggle={onToggleVisibility}
+          className="absolute top-12 left-3 z-10"
+        />
       )}
 
       {/* Actions */}
@@ -183,9 +229,11 @@ export const StoryPhotoCard: React.FC<StoryPhotoCardProps> = ({
       )}
 
       {/* Caption */}
-      <div className="story-photo-card-caption">
-        <p>{photo.filename}</p>
-      </div>
+      {captionText && (
+        <div className="story-photo-card-caption">
+          <p>{captionText}</p>
+        </div>
+      )}
     </motion.div>
   );
 };

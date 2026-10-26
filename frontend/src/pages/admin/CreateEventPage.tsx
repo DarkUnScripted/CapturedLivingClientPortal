@@ -18,6 +18,7 @@ import { addDays } from 'date-fns';
 import { toast } from 'react-toastify';
 
 import { Button, Input, Card, Notice, PasswordGenerator, LocalizedDateInput, TimeField } from '../../components/common';
+import { ExpiryPresets, EXPIRY_PRESET_DAYS } from '../../components/admin/ExpiryPresets';
 import { ThemeCustomizerEnhanced, GalleryPreview, WelcomeMessageEditor, FeedbackSettings } from '../../components/admin';
 import { CustomerAccountPicker } from '../../components/admin/CustomerAccountPicker';
 import { SectionPageHeader } from '../../components/admin/SectionPageHeader';
@@ -43,6 +44,10 @@ import { usePermission } from '../../hooks/usePermission';
 import { ExternalFolderPicker } from './event-details/ExternalFolderPicker';
 import { ThemeDisplay } from '../../components/admin';
 import { Code } from 'lucide-react';
+import { todayIsoDate } from '../../utils/localDate';
+import { radioGroupKeyDown } from '../../utils/ariaKeyboard';
+import { useProjectPrefill } from './projects/useProjectPrefill';
+import { projectsService } from '../../services/projects.service';
 
 interface FormData {
   event_type: string;
@@ -92,6 +97,8 @@ interface FormData {
     allow_reactions: boolean;
     allow_color_labels: boolean;
     allow_decisions?: boolean;
+    allow_selection_submit?: boolean;
+    allow_annotations?: boolean;
     // Optional, mirroring the shared FeedbackSettings contract — the
     // <FeedbackSettings> editor's onChange emits that shape.
     keybind_mode?: 'colors' | 'lightroom';
@@ -149,7 +156,7 @@ export const CreateEventPage: React.FC = () => {
   const [formData, setFormData] = useState<FormData>({
     event_type: 'wedding',
     event_name: '',
-    event_date: new Date().toISOString().split('T')[0], // Initialize with ISO date format
+    event_date: todayIsoDate(),
     event_time_start: '',
     event_time_end: '',
     is_full_day: true,
@@ -185,6 +192,7 @@ export const CreateEventPage: React.FC = () => {
       allow_reactions: true,
       allow_color_labels: false,
       allow_decisions: false,
+      allow_selection_submit: false,
       keybind_mode: 'colors',
       require_name_email: false,
       moderate_comments: true,
@@ -478,9 +486,33 @@ export const CreateEventPage: React.FC = () => {
     }));
   }, [formData.event_type, availableEventTypes]);
 
+  // Opened from a project's "Create gallery" (`?projectId=`): start from the
+  // project's name, occasion, date and customer, and attach the new gallery
+  // to the project once it exists (POST /projects/:id/events, which checks
+  // ownership and that the customers match).
+  const projectId = useProjectPrefill((project) => {
+    setFormData((prev) => ({
+      ...prev,
+      event_name: prev.event_name || project.name,
+      event_type: project.eventType || prev.event_type,
+      event_date: project.eventDate || prev.event_date,
+      customer_accounts: prev.customer_accounts.length || !project.customerAccountId || !project.customerEmail
+        || !portalEnabled || !canAnnounceToAccounts
+        ? prev.customer_accounts
+        : [{ id: project.customerAccountId, email: project.customerEmail, displayName: null }],
+    }));
+  });
+
   const createMutation = useMutation({
     mutationFn: eventsService.createEvent,
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      if (projectId) {
+        try {
+          await projectsService.assignEvent(projectId, data.id);
+        } catch {
+          toast.error(t('projects.events.attachAfterCreateFailed', 'The gallery was created but could not be attached to the project. Attach it on the project page.'));
+        }
+      }
       if (isMountedRef.current) {
         toast.success(t('toast.eventCreated'));
         // An import started with the gallery is followed on the Photos tab.
@@ -631,6 +663,8 @@ export const CreateEventPage: React.FC = () => {
       allow_reactions: feedbackSettings.allow_reactions,
       allow_color_labels: feedbackSettings.allow_color_labels,
       allow_decisions: feedbackSettings.allow_decisions,
+      allow_selection_submit: feedbackSettings.allow_selection_submit,
+      allow_annotations: feedbackSettings.allow_annotations,
       keybind_mode: feedbackSettings.keybind_mode,
       require_name_email: feedbackSettings.require_name_email,
       moderate_comments: feedbackSettings.moderate_comments,
@@ -820,13 +854,14 @@ export const CreateEventPage: React.FC = () => {
               <FolderOpen className="w-5 h-5" />
               {t('events.settingsTab.source', 'Photo source')}
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3" role="radiogroup" aria-label={t('events.sourceMode', 'Source Mode')}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3" role="radiogroup" aria-label={t('events.sourceMode', 'Source Mode')} onKeyDown={radioGroupKeyDown}>
               {(['managed', 'reference'] as const).map((sourceMode) => (
                 <button
                   key={sourceMode}
                   type="button"
                   role="radio"
                   aria-checked={formData.source_mode === sourceMode}
+                  tabIndex={formData.source_mode === sourceMode ? 0 : -1}
                   onClick={() => setFormData(prev => ({ ...prev, source_mode: sourceMode }))}
                   className={`flex flex-col items-start gap-1 text-left p-4 rounded-lg border-2 transition-all ${
                     formData.source_mode === sourceMode ? 'tile-selected' : 'border-line hover:border-line-strong'
@@ -1184,6 +1219,16 @@ export const CreateEventPage: React.FC = () => {
                     />
                   </div>
                   <span className="text-sm text-soft">{t('events.daysAfterEvent')}</span>
+                </div>
+                <div className="mt-2">
+                  <ExpiryPresets
+                    selected={EXPIRY_PRESET_DAYS.find((days) => days === Number(formData.expires_in_days)) ?? null}
+                    onSelect={(days) => {
+                      if (days === 'never') return;
+                      setFormData(prev => ({ ...prev, expires_in_days: days }));
+                      setErrors(prev => ({ ...prev, expires_in_days: undefined }));
+                    }}
+                  />
                 </div>
                 {formData.event_date && (
                   <p className="mt-2 text-sm text-muted">

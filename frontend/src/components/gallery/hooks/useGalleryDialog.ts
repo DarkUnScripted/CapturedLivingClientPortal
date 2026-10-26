@@ -54,6 +54,10 @@ export function useGalleryDialog({
     const layer = pushDialogLayer();
     const onKeyDown = (e: KeyboardEvent) => {
       if (!layer.isTop()) return;
+      // Escape that cancels an IME composition in a field belongs to the
+      // field. Safari ends the composition before the keydown, so only the
+      // 229 keyCode tells it apart there.
+      if (e.key === 'Escape' && (e.isComposing || e.keyCode === 229)) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -69,6 +73,19 @@ export function useGalleryDialog({
       if (items.length === 0) return;
       const firstItem = items[0];
       const lastItem = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      // Focus on a control that has since been disabled (a rating button
+      // while its request is out) is on none of the stops, so the browser
+      // would carry Tab past the end of the dialog. Move on from its place.
+      if (active && !items.includes(active)) {
+        e.preventDefault();
+        const follows = (el: HTMLElement) => !!(active.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+        const next = e.shiftKey
+          ? [...items].reverse().find((el) => !follows(el)) ?? lastItem
+          : items.find(follows) ?? firstItem;
+        next.focus();
+        return;
+      }
       if (e.shiftKey && document.activeElement === firstItem) {
         e.preventDefault();
         lastItem.focus();

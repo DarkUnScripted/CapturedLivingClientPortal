@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const os = require('os');
 const { db } = require('../database/db');
+const { leftJoinLivePhotos, livePhotos } = require('../utils/photoVisibility');
 const { deleteWithAccountingHistory } = require('../services/accountingHistory');
 const { formatBoolean } = require('../utils/dbCompat');
 const { slugify } = require('../utils/slug');
@@ -11,7 +12,7 @@ const { requirePermission } = require('../middleware/permissions');
 const StreamZip = require('node-stream-zip');
 const { requireEventOwnership, requireEventOwner, scopeEventsListQuery } = require('../middleware/ownership');
 const { assertZipEntriesWithin } = require('../utils/safePath');
-const { escapeLikePattern, likeWithEscape } = require('../utils/sqlSecurity');
+const { escapeLikePattern, likeWithEscape, unicodeSearchForms } = require('../utils/sqlSecurity');
 const logger = require('../utils/logger');
 const { sanitizeForZipEntry } = require('../utils/filenameSanitizer');
 const { getPagination } = require('../utils/routeHelpers');
@@ -21,7 +22,11 @@ const { clearGuestCredits } = require('../services/photoCredit');
 const folderTree = require('../services/folderTreeService');
 const { parseBooleanInput } = require('../utils/parsers');
 const { getStorage } = require('../services/storage');
-const { pipeStreamToResponse } = require('../utils/streamResponse');
+const {
+  claimArchive, isArchiveRunning, recordSupersededArchive, supersededArchives, legacyArchiveKeys,
+} = require('../services/archiveService');
+const { pipeStreamToResponse, answerVanished } = require('../utils/streamResponse');
+const { DEFAULT_STALE_MS } = require('../services/maintenanceJobState');
 const router = express.Router();
 
 /**
@@ -70,10 +75,12 @@ router.get('/', adminAuth, requirePermission('archives.view'), async (req, res) 
       // to its own events.
       scopeEventsListQuery(query, req.admin, 'events.created_by');
       if (search) {
-        query.whereRaw(
-          likeWithEscape('events.event_name'),
-          [`%${escapeLikePattern(search)}%`]
-        );
+        // Every stored spelling of the name (unicodeSearchForms).
+        query.where((builder) => {
+          for (const form of unicodeSearchForms(search)) {
+            builder.orWhereRaw(likeWithEscape('events.event_name'), [`%${escapeLikePattern(form)}%`]);
+          }
+        });
       }
       if (type && type !== 'all') {
         query.where('events.event_type', type);
@@ -97,7 +104,7 @@ router.get('/', adminAuth, requirePermission('archives.view'), async (req, res) 
     const photoTotal = await applyFilters(
       db('events').where('events.is_archived', formatBoolean(true))
     )
-      .leftJoin('photos', 'events.id', 'photos.event_id')
+      .modify(leftJoinLivePhotos, 'events.id', 'photos.event_id')
       .count('photos.id as count')
       .first();
 
@@ -109,7 +116,7 @@ router.get('/', adminAuth, requirePermission('archives.view'), async (req, res) 
           db.raw('COUNT(DISTINCT photos.id) as photo_count'),
           db.raw('SUM(photos.size_bytes) as total_size')
         )
-        .leftJoin('photos', 'events.id', 'photos.event_id')
+        .modify(leftJoinLivePhotos, 'events.id', 'photos.event_id')
         .where('events.is_archived', formatBoolean(true))
     ).groupBy('events.id');
 
@@ -183,7 +190,7 @@ router.get('/:id', adminAuth, requirePermission('archives.view'), requireEventOw
     }
 
     // Get photo details
-    const photos = await db('photos')
+    const photos = await livePhotos(db)
       .where('event_id', archive.id)
       .select('filename', 'type', 'size_bytes', 'uploaded_at');
 
@@ -231,12 +238,31 @@ router.get('/:id', adminAuth, requirePermission('archives.view'), requireEventOw
 
 // Restore archive
 router.post('/:id/restore', adminAuth, requirePermission('archives.restore'), requireEventOwnership, async (req, res) => {
+  let lease = null;
   try {
-    const archive = await db('events')
+    let archive = await db('events')
       .where('id', req.params.id)
       .where('is_archived', formatBoolean(true))
       .first();
 
+    if (!archive) {
+      return res.status(404).json({ error: 'Archive not found' });
+    }
+
+    // The archive job sets is_archived before it deletes the originals and
+    // derived files (issue 2012): restoring in that window would bring photos
+    // back for the job to delete. The restore holds the gallery's archive
+    // claim, so it waits for no job and none starts under it, and a job that
+    // stalled past its lease sees the claim gone and stops deleting.
+    lease = await claimArchive(archive.id);
+    if (!lease) {
+      return res.status(409).json({ error: 'This gallery is being archived right now', code: 'ARCHIVE_IN_PROGRESS' });
+    }
+    // Again under the claim: a restore that finished in the meantime.
+    archive = await db('events')
+      .where('id', archive.id)
+      .where('is_archived', formatBoolean(true))
+      .first();
     if (!archive) {
       return res.status(404).json({ error: 'Archive not found' });
     }
@@ -666,7 +692,8 @@ router.post('/:id/restore', adminAuth, requirePermission('archives.restore'), re
         let folderId = null;
         if (manifestEntry?.folder_path) {
           const segments = String(manifestEntry.folder_path).split('/').filter(Boolean);
-          ({ folderId } = await folderTree.ensurePath(archive.id, segments, { canCreate: true }));
+          // foldAtLimit: a restore never drops a photo over the folder cap.
+          ({ folderId } = await folderTree.ensurePath(archive.id, segments, { canCreate: true, foldAtLimit: true }));
         }
         if (categoryId) {
           const resolved = await db('photo_categories').where('id', categoryId).first('is_folder');
@@ -686,6 +713,12 @@ router.post('/:id/restore', adminAuth, requirePermission('archives.restore'), re
           // legacy archives without a manifest lose nothing (filename
           // is what they had before).
           original_filename: manifestEntry?.original_filename || filename,
+          // As migration 193 backfills it: COALESCE(original_filename,
+          // filename). Left null, a restored watch-folder photo no
+          // longer reads as camera-named, so two restored galleries
+          // with an IMG_0001.JPG regenerated one shared thumbnail,
+          // preview and hero (imageProcessor ownDerivativeName).
+          source_filename: manifestEntry?.original_filename || filename,
           path: storageKey,
           thumbnail_path: null, // Will be regenerated by thumbnail service
           // Two values, 'individual' or 'collage', and the download zip
@@ -769,26 +802,36 @@ router.post('/:id/restore', adminAuth, requirePermission('archives.restore'), re
     const thirtyDaysFromNow = new Date();
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
     
-    await db('events')
-      .where('id', req.params.id)
-      .update({
-        is_archived: formatBoolean(false),
-        is_active: formatBoolean(true),
-        archive_path: null,
-        // Cleared with the path it measures — a restored event has no zip, and
-        // a stale size would be re-shown verbatim if it is archived again
-        // before the new archive finishes writing.
-        archive_size: null,
-        archived_at: null,
-        expires_at: thirtyDaysFromNow.toISOString() // Reset expiration - works on both DBs
-      });
+    // The zip stays (issue 2012): the gallery's fallback until it has a newer
+    // archive. Each archive run writes a key of its own, so archiving again no
+    // longer overwrites it; recorded with the update that drops its path, it
+    // goes once the next archive is published, or with the gallery.
+    await db.transaction(async (trx) => {
+      await trx('events')
+        .where('id', req.params.id)
+        .update({
+          is_archived: formatBoolean(false),
+          is_active: formatBoolean(true),
+          archive_path: null,
+          // Cleared with the path it measures — a restored event has no zip, and
+          // a stale size would be re-shown verbatim if it is archived again
+          // before the new archive finishes writing.
+          archive_size: null,
+          archived_at: null,
+          expires_at: thirtyDaysFromNow.toISOString() // Reset expiration - works on both DBs
+        });
+      await recordSupersededArchive(lease, archive.archive_path, trx);
+    });
 
     // Browser-playable copies (issue 1430): archiving dropped them and reset
     // the rows (archiveService). With the setting on, the restored videos are
     // queued again here; off, they wait for the next switch-on backfill.
+    // Metadata stripping (issue 2102) queues them on its own while it is on.
     const videoRendition = require('../services/videoRenditionService');
     if (await videoRendition.isEnabled()) {
       await videoRendition.backfillPending({ eventId: archive.id });
+    } else {
+      await videoRendition.queueForMetadataStrip({ eventId: archive.id });
     }
 
     // Log activity
@@ -805,6 +848,8 @@ router.post('/:id/restore', adminAuth, requirePermission('archives.restore'), re
   } catch (error) {
     logger.error('Archive restore error:', error);
     res.status(500).json({ error: 'Failed to restore archive' });
+  } finally {
+    if (lease) await lease.release();
   }
 });
 
@@ -858,6 +903,8 @@ router.get('/:id/download', adminAuth, requirePermission('archives.download'), r
       metadata: JSON.stringify({ event_name: archive.event_name })
     });
   } catch (error) {
+    // Removed since the stat (issue 2129): the failed stat's 404.
+    if (answerVanished(res, error, 'Archive file not found in storage')) return;
     logger.error('Archive download error:', error);
     res.status(500).json({ error: 'Failed to download archive' });
   }
@@ -874,6 +921,9 @@ router.delete('/:id', adminAuth, requirePermission('archives.delete'), requireEv
     if (!archive) {
       return res.status(404).json({ error: 'Archive not found' });
     }
+    if (await isArchiveRunning(archive.id)) {
+      return res.status(409).json({ error: 'This gallery is being archived right now', code: 'ARCHIVE_IN_PROGRESS' });
+    }
 
     // Delete archive file if exists. Through the storage backend: on an S3
     // deployment the local path never had it, so the zip outlived the event.
@@ -882,6 +932,13 @@ router.delete('/:id', adminAuth, requirePermission('archives.delete'), requireEv
     // would leave the zip in the bucket with nothing left to retry from.
     if (archive.archive_path) {
       await getStorage().delete(archive.archive_path);
+    }
+    // Zips earlier restores brought back (issue 2012), best effort, the one
+    // a restore before per-run keys left at the shared key too.
+    const restoredFrom = [...await supersededArchives(archive.id).catch(() => []),
+      ...await legacyArchiveKeys(archive).catch(() => [])];
+    for (const key of restoredFrom) {
+      if (key !== archive.archive_path) await getStorage().delete(key).catch(() => {});
     }
 
     // Delete thumbnails for this event
@@ -913,12 +970,18 @@ router.delete('/:id', adminAuth, requirePermission('archives.delete'), requireEv
     const hasMergeDismissals = await db.schema.hasTable('event_people_merge_dismissals');
     const hasDownloadGrants = await db.schema.hasTable('event_download_grants');
     const hasAdminAssignments = await db.schema.hasTable('event_admin_assignments');
+    const hasDownloadRecipients = await db.schema.hasTable('download_job_recipients');
+    const hasSelectionSubmissions = await db.schema.hasTable('selection_submissions');
     await db.transaction(async (trx) => {
       // Event row first (issue 1560): the download-limit grants lock the
       // event row and then grant/photo rows, so taking them here in the
       // opposite order could deadlock on PostgreSQL.
       if (trx.client.config.client === 'pg') {
         await trx('events').where({ id: req.params.id }).forUpdate().first();
+        // Then its photos (issue 2069): a face scan locks its photo before
+        // the photo's faces, so deleting the faces below first could wait for
+        // a scan that waits for the photo delete at the end.
+        await trx('photos').where('event_id', req.params.id).orderBy('id').forUpdate().pluck('id');
       }
       await trx('activity_logs').where('event_id', req.params.id).del();
       await trx('access_logs').where('event_id', req.params.id).del();
@@ -936,8 +999,27 @@ router.delete('/:id', adminAuth, requirePermission('archives.delete'), requireEv
       if (hasAdminAssignments) {
         await trx('event_admin_assignments').where('event_id', req.params.id).del();
       }
+      if (hasDownloadRecipients) {
+        await trx('download_job_recipients')
+          .whereIn('job_id', trx('download_jobs').where('event_id', req.params.id).select('id')).del();
+      }
       await trx('feedback_rate_limits').where('event_id', req.params.id).del();
+      if (hasSelectionSubmissions) {
+        await trx('selection_submissions').where('event_id', req.params.id).del();
+      }
       await trx('photos').where('event_id', req.params.id).del();
+      // Scene tags (issue 1733) stay with an archived gallery's photo rows.
+      // After the photos: a tagging worker locks the photo row first, and
+      // taking the two in the other order can deadlock on PostgreSQL.
+      await trx('photo_tags').where('event_id', req.params.id).del();
+      if (await trx.schema.hasTable('maintenance_jobs')) {
+        // Only a claim nobody holds, on claim()'s own terms: a restore that
+        // took the gallery after the check above still needs its row.
+        const cutoff = new Date(Date.now() - DEFAULT_STALE_MS).toISOString();
+        await trx('maintenance_jobs').where({ job_name: `event_archive:${Number(req.params.id)}` })
+          .where(function () { this.where('is_running', false).orWhere('heartbeat_at', '<', cutoff); })
+          .del();
+      }
       await deleteWithAccountingHistory(trx, 'events', { id: req.params.id },
         { actor: req.admin.id, source: 'archive.delete' });
     });

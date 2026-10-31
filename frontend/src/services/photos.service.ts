@@ -1,6 +1,9 @@
 import { api } from '../config/api';
+import type { PhotoExif } from '../types';
 import { parseContentDispositionFilename } from '../utils/contentDisposition';
 import { uploadMultipartBudget } from '../utils/uploadMultipartBudget';
+
+export type PhotoVisibility = 'visible' | 'hidden';
 
 export interface AdminPhoto {
   id: number;
@@ -9,17 +12,20 @@ export interface AdminPhoto {
   path: string;
   url: string;
   thumbnail_url: string | null;
+  // Blurred tile placeholder (issue 1733): a base64 ThumbHash, or null.
+  thumb_hash?: string | null;
   type: string;
   category_id: number | string | null;
   category_name: string | null;
   category_slug: string | null;
   size: number;
   uploaded_at: string;
+  visibility?: PhotoVisibility;
   media_type?: 'photo' | 'video';
   mime_type?: string | null;
   // Browser-playable copy of a video (issue 1430, item 8); null until the
   // setting has queued it.
-  web_status?: 'pending' | 'processing' | 'complete' | 'skipped' | 'failed' | null;
+  web_status?: 'pending' | 'processing' | 'complete' | 'skipped' | 'deferred' | 'failed' | null;
   web_error?: string | null;
   processing_status?: 'pending' | 'processing' | 'complete' | 'failed';
   // Set on a complete video that shows the placeholder tile because no
@@ -51,6 +57,8 @@ export interface AdminPhoto {
   credit_name?: string | null;
   credit_source?: 'guest' | 'exif' | 'manual' | 'account' | null;
   uploaded_by?: 'admin' | 'guest';
+  // Camera details (issue 1733, D1); null when the photo carries none.
+  exif?: PhotoExif | null;
   // Folders (issue 1786): the folder the photo lives in (null = gallery
   // root), and the open folder request it waits on, if any.
   folder_id?: number | null;
@@ -59,6 +67,9 @@ export interface AdminPhoto {
   first_look?: boolean;
   // Review of team members' uploads (issue 743): null = published as usual.
   moderation_status?: PhotoModerationStatus | null;
+  // Why no gallery viewer sees the photo (issue 2121): 'source_missing' when
+  // its file is gone from the external folder; null otherwise.
+  unavailable_reason?: 'source_missing' | null;
   // The admin account that ran the upload; null for imports and older rows.
   uploaded_by_admin?: { id: number; username: string | null } | null;
 }
@@ -75,6 +86,45 @@ export interface PhotoModerationCounts {
 // backend/src/services/photoCredit.js.
 export const CREDIT_FILTER_NONE = '__none__';
 
+/**
+ * What a delete did (issue 1733): `trashed` photos can be restored for
+ * `retention_days`, `deleted` ones are gone, `failed` ids are still in the
+ * gallery.
+ */
+export interface PhotoDeleteResult {
+  trashed?: number;
+  deleted?: number;
+  failed?: number[];
+  retention_days?: number;
+}
+
+export interface TrashedPhoto {
+  /** The photo's own id: trash and restore do not change it. */
+  id: number;
+  filename: string;
+  media_type: string;
+  size_bytes: number;
+  deleted_at: string;
+  deleted_by_name: string | null;
+  purge_after: string;
+  /** It was under review when deleted and comes back that way. */
+  held: boolean;
+  /** Admin-only; null when the photo has no thumbnail. */
+  thumbnail_url: string | null;
+}
+
+export interface PhotoTrash {
+  items: TrashedPhoto[];
+  /** 0: deleting is final, nothing goes to the trash. */
+  retention_days: number;
+}
+
+export interface TrashRestoreResult {
+  restored: number;
+  photo_ids: number[];
+  failed: Array<{ id: number; filename: string; code: string; error: string }>;
+}
+
 /** Admin filter on the guests' approve / reject (issue 744). */
 export type DecisionFilter = 'approved' | 'rejected' | 'undecided';
 
@@ -84,7 +134,7 @@ export interface PhotoCreditSummary {
 }
 
 /** Sort keys of the admin photo list. `date` is the upload date. */
-export type PhotoSortKey = 'date' | 'name' | 'size' | 'rating' | 'capture_date';
+export type PhotoSortKey = 'date' | 'name' | 'size' | 'rating' | 'capture_date' | 'likes' | 'favorites' | 'downloads';
 
 /**
  * Folder filter of the admin photo list (issue 1786): `root` = photos in no
@@ -98,6 +148,7 @@ export interface PhotoFilters {
   folder_id?: PhotoFolderFilter;
   type?: string;
   media_type?: 'photo' | 'video';
+  visibility?: PhotoVisibility;
   search?: string;
   sort?: PhotoSortKey;
   order?: 'asc' | 'desc';
@@ -115,6 +166,8 @@ export interface PhotoFilters {
   credit?: string;
   /** Only the photos under review with this status (issue 743). */
   moderation?: PhotoModerationStatus;
+  /** Only the photos whose file is gone from the external folder (issue 2121). */
+  unavailable?: boolean;
   logic?: 'AND' | 'OR';
 }
 
@@ -181,6 +234,7 @@ class PhotosService {
       if (filters.folder_id !== undefined) params.append('folder_id', String(filters.folder_id));
       if (filters.type) params.append('type', filters.type);
       if (filters.media_type) params.append('media_type', filters.media_type);
+      if (filters.visibility) params.append('visibility', filters.visibility);
       if (filters.search) params.append('search', filters.search);
       if (filters.sort) params.append('sort', filters.sort);
       if (filters.order) params.append('order', filters.order);
@@ -201,6 +255,7 @@ class PhotosService {
       }
       if (filters.credit) params.append('credit', filters.credit);
       if (filters.moderation) params.append('moderation', filters.moderation);
+      if (filters.unavailable) params.append('unavailable', 'true');
       if (filters.logic) params.append('logic', filters.logic);
     }
     
@@ -249,12 +304,33 @@ class PhotosService {
     return response.data;
   }
 
-  async deletePhoto(eventId: number, photoId: number): Promise<void> {
-    await api.delete(`/admin/events/${eventId}/photos/${photoId}`);
+  async deletePhoto(eventId: number, photoId: number): Promise<PhotoDeleteResult> {
+    const response = await api.delete(`/admin/events/${eventId}/photos/${photoId}`);
+    return response.data;
   }
 
-  async deletePhotos(eventId: number, photoIds: number[]): Promise<void> {
-    await api.post(`/admin/events/${eventId}/photos/bulk-delete`, { photoIds });
+  async deletePhotos(eventId: number, photoIds: number[]): Promise<PhotoDeleteResult> {
+    const response = await api.post(`/admin/events/${eventId}/photos/bulk-delete`, { photoIds });
+    return response.data;
+  }
+
+  /** The gallery's trash (issue 1733): deleted photos that can still be restored. */
+  async getTrash(eventId: number): Promise<PhotoTrash> {
+    const response = await api.get(`/admin/events/${eventId}/photos/trash`);
+    return response.data;
+  }
+
+  async restoreFromTrash(eventId: number, ids: number[]): Promise<TrashRestoreResult> {
+    // 409 carries the same body: nothing could be restored, and why.
+    const response = await api.post(`/admin/events/${eventId}/photos/trash/restore`, { ids }, {
+      validateStatus: (status) => (status >= 200 && status < 300) || status === 409,
+    });
+    return response.data;
+  }
+
+  async purgeFromTrash(eventId: number, ids: number[]): Promise<{ purged: number; failed: number[] }> {
+    const response = await api.post(`/admin/events/${eventId}/photos/trash/purge`, { ids });
+    return response.data;
   }
 
   async updatePhotoCategory(eventId: number, photoId: number, categoryId: number | string | null): Promise<AdminPhoto> {
@@ -293,7 +369,7 @@ class PhotosService {
       response.headers['content-disposition'] || response.headers['Content-Disposition'];
     const serverFilename = parseContentDispositionFilename(headerName);
 
-    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const url = window.URL.createObjectURL(response.data);
     const link = document.createElement('a');
     link.href = url;
     link.download = serverFilename || filename;
@@ -359,11 +435,14 @@ class PhotosService {
     eventId: number,
     uploadId: string,
     categoryId?: number | null,
-    folder: FolderPlacement = {}
+    folder: FolderPlacement = {},
+    detectDuplicates = false
   ): Promise<{ success: boolean; uploaded: number; photos: AdminPhoto[] }> {
     const response = await api.post(
       `/admin/photos/${eventId}/chunked-upload/${uploadId}/complete`,
-      uploadPlacementBody({ ...folder, categoryId }),
+      // detect_duplicates asks the server to refuse a file the gallery already
+      // holds (issue 1733, C2); "upload anyway" leaves it out.
+      { ...uploadPlacementBody({ ...folder, categoryId }), ...(detectDuplicates ? { detect_duplicates: true } : {}) },
       // Merge + ffmpeg thumbnail can take a while on large videos.
       { timeout: 0 }
     );
@@ -379,7 +458,8 @@ class PhotosService {
     file: File,
     categoryId?: number | null,
     onProgress?: (progress: number) => void,
-    folder: FolderPlacement = {}
+    folder: FolderPlacement = {},
+    detectDuplicates = false
   ): Promise<AdminPhoto[]> {
     // Initialize upload
     const { uploadId, expectedChunks } = await this.initChunkedUpload(
@@ -404,7 +484,7 @@ class PhotosService {
       }
 
       // Complete upload
-      const result = await this.completeChunkedUpload(eventId, uploadId, categoryId, folder);
+      const result = await this.completeChunkedUpload(eventId, uploadId, categoryId, folder, detectDuplicates);
       return result.photos;
     } catch (error) {
       // Abort on error
@@ -488,7 +568,7 @@ class PhotosService {
     }
 
     // Download the file
-    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const url = window.URL.createObjectURL(response.data);
     const link = document.createElement('a');
     link.href = url;
     link.download = filename;

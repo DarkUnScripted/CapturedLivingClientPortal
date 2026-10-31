@@ -20,6 +20,7 @@ import { Button, Card, Loading, Input, LocalizedDateInput, TimeField } from '../
 import { DocumentHeader } from '../../../components/admin/DocumentHeader';
 import { useConfirm } from '../../../components/common/ConfirmDialog';
 import { SettingsSaveBar } from '../../../components/admin/SettingsSaveBar';
+import { useLeaveGuard } from '../../../contexts/UnsavedChangesContext';
 import {
   quotesService,
   type QuoteCreatePayload,
@@ -40,6 +41,7 @@ import { vatCodesService } from '../../../services/vatCodes.service';
 import { eventTypesService } from '../../../services/eventTypes.service';
 import { workflowsService } from '../../../services/workflows.service';
 import { useFeatureFlags } from '../../../contexts/FeatureFlagsContext';
+import { useProjectPrefill } from '../projects/useProjectPrefill';
 import { InstallmentsPanel } from '../../../components/admin/InstallmentsPanel';
 import { customerAdminService } from '../../../services/customerAdmin.service';
 import { userManagementService } from '../../../services/userManagement.service';
@@ -47,6 +49,7 @@ import { settingsService } from '../../../services/settings.service';
 import { useAdminAuth } from '../../../contexts/AdminAuthContext';
 import { toast } from 'react-toastify';
 import { quoteErrorText } from '../../../utils/quoteErrors';
+import { todayIsoDate } from '../../../utils/localDate';
 
 interface FormState {
   customerAccountId: number | null;
@@ -97,7 +100,7 @@ const empty: FormState = {
   customerIsPassive: false,
   language: 'de',
   currency: 'CHF',
-  issueDate: new Date().toISOString().slice(0, 10),
+  issueDate: todayIsoDate(),
   validUntil: '',
   eventName: '',
   eventDate: '',
@@ -278,6 +281,24 @@ export const QuoteForm = forwardRef<QuoteFormHandle, QuoteFormProps>(({ quoteId,
       }
     })();
   }, [isEdit, searchParams]);
+
+  // Opened from a project's "Create quote" (`?projectId=`): the quote joins
+  // the project and starts from its occasion, name and date. The customer
+  // comes through `?customerAccountId=` above.
+  // The link itself is taken from the URL at once, so a quote saved before the
+  // project has loaded still joins it, and dropped if the project cannot load.
+  const prefillProjectId = useProjectPrefill((project) => setForm((prev) => ({
+    ...prev,
+    eventName: prev.eventName || project.name,
+    eventDate: prev.eventDate || project.eventDate || '',
+    eventType: prev.eventType || project.eventType || '',
+  })), {
+    enabled: !isEdit,
+    onError: (failedId) => setForm((prev) => (prev.projectId === failedId ? { ...prev, projectId: null } : prev)),
+  });
+  useEffect(() => {
+    if (prefillProjectId) setForm((prev) => (prev.projectId ? prev : { ...prev, projectId: prefillProjectId }));
+  }, [prefillProjectId]);
 
   // Seed the VAT from the configured default OUTPUT code (Settings →
   // Accounting) on a brand-new, blank quote — so quotes (and the invoices they
@@ -864,6 +885,7 @@ QuoteForm.displayName = 'QuoteForm';
 export const QuoteEditorPage: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { unguarded } = useLeaveGuard();
   const formRef = useRef<QuoteFormHandle>(null);
   const [state, setState] = useState<QuoteFormState>({ dirty: true, busy: false, valid: true, canRecalculate: false });
   // Created: the form no longer counts as unsaved, so opening the new page
@@ -890,7 +912,7 @@ export const QuoteEditorPage: React.FC = () => {
             <Button variant="outline" onClick={() => formRef.current?.previewUnsaved()} disabled={state.busy} leftIcon={<Eye className="w-4 h-4" />}>
               {t('quotes.preview', 'Preview PDF')}
             </Button>
-            <Button variant="ghost" onClick={() => navigate('/admin/clients/quotes')} disabled={state.busy}>
+            <Button variant="ghost" onClick={() => unguarded(() => navigate('/admin/clients/quotes'))} disabled={state.busy}>
               {t('common.cancel', 'Cancel')}
             </Button>
           </>

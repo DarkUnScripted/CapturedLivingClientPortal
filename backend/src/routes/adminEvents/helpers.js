@@ -5,13 +5,55 @@ const logger = require('../../utils/logger');
 const settings = require('../../services/eventSettings');
 const { deleteWithAccountingHistory } = require('../../services/accountingHistory');
 
+function eventNotFound() {
+  const err = new Error('Event not found');
+  err.code = 'EVENT_NOT_FOUND';
+  return err;
+}
+
+/**
+ * Take the gallery's archive claim for a write that keeps the gallery live:
+ * an extended expiry, a reactivation. An archive running under it would
+ * still publish and delete the originals (issue 2012). Throws a 409
+ * ARCHIVE_IN_PROGRESS while one runs; the caller releases the lease.
+ */
+async function claimEventArchive(eventId) {
+  const lease = await require('../../services/archiveService').claimArchive(eventId);
+  if (!lease) {
+    const { AppError } = require('../../utils/errors');
+    throw new AppError('This gallery is being archived right now', 409, 'ARCHIVE_IN_PROGRESS');
+  }
+  return lease;
+}
+
 async function deleteEventCascade(eventId, adminContext) {
-  const event = await db('events').where('id', eventId).first();
-  if (!event) {
-    const err = new Error('Event not found');
-    err.code = 'EVENT_NOT_FOUND';
+  const found = await db('events').where('id', eventId).first();
+  if (!found) throw eventNotFound();
+  // An archive job still reading the photos would upload a zip for a gallery
+  // that no longer exists (issue 2012). The delete holds the gallery's
+  // archive claim, so none starts under it either, and the row is read again
+  // under the claim: a job that finished in between has set archive_path.
+  const archiveService = require('../../services/archiveService');
+  const lease = await archiveService.claimArchive(found.id);
+  if (!lease) {
+    const err = new Error('This gallery is being archived right now');
+    err.code = 'ARCHIVE_IN_PROGRESS';
     throw err;
   }
+  try {
+    const event = await db('events').where('id', found.id).first();
+    if (!event) throw eventNotFound();
+    // Zips earlier restores brought back go with the gallery, the one a
+    // restore before per-run keys left at the shared key too.
+    const superseded = [...await archiveService.supersededArchives(event.id),
+      ...await archiveService.legacyArchiveKeys(event)];
+    return await deleteClaimedEvent(eventId, event, adminContext, superseded);
+  } finally {
+    await lease.release();
+  }
+}
+
+async function deleteClaimedEvent(eventId, event, adminContext, supersededArchives = []) {
 
   // Responsive tiers (#1095 / #492) live in the top-level thumbnails/ and
   // previews/ directories, not under the event folder the filesystem sweep
@@ -28,8 +70,13 @@ async function deleteEventCascade(eventId, adminContext) {
   // count unchanged, 679 rows gone.
   const tieredPhotos = await db('photos')
     .where('event_id', eventId)
-    .select('id', 'path', 'filename', 'source_origin', 'external_relpath',
-      'thumbnail_path', 'hero_path', 'preview_path', 'watermark_path', 'web_path');
+    // size_bytes, source_mtime_ms: an external row's tier keys carry them,
+    // and the tiers are swept after the rows are gone, when they can no
+    // longer be read. event_id and processing_attempt_id likewise for a RAW
+    // row, whose tier keys are scoped by them (derivativeCacheId).
+    .select('id', 'event_id', 'path', 'filename', 'source_origin', 'external_relpath', 'size_bytes', 'source_mtime_ms',
+      'processing_attempt_id',
+      'thumbnail_path', 'hero_path', 'preview_path', 'watermark_path', 'web_path', 'hls_path', 'hls_status');
 
   // A Set because a photo can carry the same key in two columns (an unresized
   // gallery's hero and preview can resolve to one object) and deleting it
@@ -112,6 +159,7 @@ async function deleteEventCascade(eventId, adminContext) {
   // no-op on S3 and, for a row carrying `../`, an unlink outside storage. The
   // backend refuses such a key.
   if (event.archive_path) storageKeys.add(event.archive_path);
+  for (const key of supersededArchives) storageKeys.add(key);
 
   // The download caches are the subtle ones: they live UNDER
   // events/active/{slug}/.download-cache/, so the recursive fs.rm below covers
@@ -155,6 +203,10 @@ async function deleteEventCascade(eventId, adminContext) {
     // serialises writers anyway.
     if (trx.client.config.client === 'pg') {
       await trx('events').where({ id: eventId }).forUpdate().first();
+      // Then its photos (issue 2069): a face scan locks its photo before
+      // the photo's faces, so deleting the faces below first could wait for
+      // a scan that waits for the photo delete at the end.
+      await trx('photos').where('event_id', eventId).orderBy('id').forUpdate().pluck('id');
     }
     // 1. Delete activity logs (audit trail) — and the per-admin bell
     // dismissals that point at them (migration 261). On PostgreSQL the FK
@@ -196,12 +248,31 @@ async function deleteEventCascade(eventId, adminContext) {
     if (await trx.schema.hasTable('event_admin_assignments')) {
       await trx('event_admin_assignments').where('event_id', eventId).del();
     }
+    // "Mail me when the download is ready" requests (migration 293) hold
+    // addresses and hang off download_jobs: the same inert-cascade reason.
+    if (await trx.schema.hasTable('download_job_recipients')) {
+      await trx('download_job_recipients')
+        .whereIn('job_id', trx('download_jobs').where('event_id', eventId).select('id')).del();
+    }
     // feedback_rate_limits.event_id is also ON DELETE CASCADE (#1585), same
     // SQLite caveat as photo_faces above — delete explicitly so an event's
     // rate-limit tracking rows don't outlive it on the SQLite path.
     await trx('feedback_rate_limits').where('event_id', eventId).del();
+    // Finished selections and approvals (migration 291): the same reason.
+    if (await trx.schema.hasTable('selection_submissions')) {
+      await trx('selection_submissions').where('event_id', eventId).del();
+    }
 
     await trx('photos').where('event_id', eventId).del();
+    // Scene tags (issue 1733): the same inert-cascade reason. After the
+    // photos, not with the face data above: a tagging worker locks the photo
+    // row before its tags, and the reverse order can deadlock on PostgreSQL.
+    await trx('photo_tags').where('event_id', eventId).del();
+    // The archive claim row (event_archive:<id>) has no FK to the event, so
+    // it would outlive it. Guarded for a pre-migration install.
+    if (await trx.schema.hasTable('maintenance_jobs')) {
+      await trx('maintenance_jobs').where({ job_name: `event_archive:${eventId}` }).del();
+    }
     // 5. Finally delete the event row
     await deleteWithAccountingHistory(trx, 'events', { id: eventId },
       { actor: adminContext?.id ?? null, source: 'event.delete' });
@@ -249,9 +320,12 @@ async function deleteEventCascade(eventId, adminContext) {
   // delete is not.
   try {
     const { deleteThumbnailTiers, deletePreviewTiers } = require('../../services/imageProcessor');
+    const { deleteLadder } = require('../../services/videoHlsService');
     for (const photo of tieredPhotos) {
       await deleteThumbnailTiers(photo);
       await deletePreviewTiers(photo);
+      // Adaptive streaming ladder (issue 1733): its keys derive from the id.
+      await deleteLadder(photo);
     }
   } catch (tierErr) {
     logger.warn('Failed to delete responsive tiers during cascade delete', { eventId, error: tierErr.message });
@@ -319,4 +393,4 @@ async function deleteEventCascade(eventId, adminContext) {
   return { id: event.id, name: event.event_name };
 }
 
-module.exports = { ...settings, deleteEventCascade };
+module.exports = { ...settings, deleteEventCascade, claimEventArchive };

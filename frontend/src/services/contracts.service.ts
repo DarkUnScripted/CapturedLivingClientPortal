@@ -92,6 +92,9 @@ export interface ContractSigner {
   /** Reminders sent so far (#1446). */
   reminderCount?: number;
   remindedAt?: string | null;
+  /** The customer takes no administrative emails (migration 300) and this
+   *  signer is them: their link is never mailed (no resend / reminder). */
+  noMail?: boolean;
 }
 
 /**
@@ -282,6 +285,9 @@ export interface ContractSummary {
   customerAccountId: number;
   /** Migration 121 — Project Overview link (null when unlinked). */
   projectId: number | null;
+  /** With `attachTo`: attaching it to that project takes something out of
+   *  another one (it, or a record of its deal, is in another project). */
+  attachMoves?: boolean;
   customer: {
     email: string | null;
     displayName: string | null;
@@ -289,6 +295,8 @@ export interface ContractSummary {
     lastName: string | null;
     companyName: string | null;
     preferredLanguage?: string | null;
+    /** No administrative emails (migration 300): send becomes Issue. */
+    noAdminEmails?: boolean;
   };
   status: ContractStatus;
   language: string;
@@ -442,6 +450,8 @@ export const contractsService = {
     sort?: ContractSort;
     page?: number;
     pageSize?: number;
+    /** Adds `attachMoves` for this project to each row (the project page's add window). */
+    attachTo?: number;
   } = {}): Promise<ContractListResponse> {
     const { data } = await api.get('/admin/contracts', {
       params: { ...params, status: params.status?.join(',') },

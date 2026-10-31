@@ -1,15 +1,43 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Calendar, Heart } from 'lucide-react';
-import { format, parseISO, startOfDay, startOfWeek, startOfMonth } from 'date-fns';
+import { format, startOfDay, startOfWeek, startOfMonth } from 'date-fns';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { PhotoCard } from '../PhotoCard';
 import { firstLookAboveChips } from '../GalleryTileBadges';
+import { ClientVisibilityToggle, isHiddenFromGuests } from '../ClientVisibilityToggle';
 import type { BaseGalleryLayoutProps } from './BaseGalleryLayout';
 import type { Photo } from '../../../types';
 import { useLazyBands } from './lazyBands';
+import { densityColumnDelta, useGridDensity } from '../gridDensity';
 import { FeedbackIdentityModal } from '../../gallery/FeedbackIdentityModal';
 import { feedbackService } from '../../../services/feedback.service';
-import { useLocalizedDate } from '../../../hooks/useLocalizedDate';
+import { toDisplayDate, useLocalizedDate } from '../../../hooks/useLocalizedDate';
+import { WINDOW_MIN_PHOTOS } from './rowWindow';
+import { GRID_TILE_ATTR, TIMELINE_GROUP_WINDOW_MIN_PHOTOS, useGridWindow } from './gridWindow';
+
+const GRID_TILE_PROPS = { [GRID_TILE_ATTR]: '' } as React.HTMLAttributes<HTMLDivElement>;
+
+/**
+ * One date group's grid. In a large gallery each group mounts only its rows
+ * near the viewport (issue 2193); the date headers between them stay mounted.
+ */
+const TimelineGroupGrid: React.FC<{
+  photos: Photo[];
+  /** The grid's classes, its columns moved by the viewer's density. */
+  className: string;
+  windowed: boolean;
+  renderTile: (photo: Photo) => React.ReactNode;
+}> = ({ photos, className, windowed, renderTile }) => {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const { tiles, before, after } = useGridWindow(gridRef, photos, windowed);
+  return (
+    <div ref={gridRef} className={className}>
+      {before > 0 && <div aria-hidden="true" style={{ gridColumn: '1 / -1', height: before }} />}
+      {tiles.map(({ photo }) => renderTile(photo))}
+      {after > 0 && <div aria-hidden="true" style={{ gridColumn: '1 / -1', height: after }} />}
+    </div>
+  );
+};
 
 export const TimelineGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
   photos,
@@ -22,11 +50,17 @@ export const TimelineGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
   onPhotoSelect,
   allowDownloads = true,
   feedbackEnabled = false,
-  feedbackOptions
+  feedbackOptions,
+  isClient = false,
+  onToggleVisibility,
 }) => {
   const bands = useLazyBands();
   const { theme } = useTheme();
   const { formatTime: fmtTime } = useLocalizedDate();
+  // The timeline's fixed 2/3/4 columns, moved by the viewer's density (issue
+  // 1733, E4). The grid-cols classes are safelisted in tailwind.config.
+  const delta = densityColumnDelta(useGridDensity());
+  const cols = (base: number) => Math.max(1, base + delta);
   const [likedIds, setLikedIds] = useState<Set<number>>(new Set());
   // Seed from server is_liked on first non-empty payload (#590 follow-up).
   // Mount-only so refetches don't clobber in-session optimistic toggles.
@@ -48,8 +82,12 @@ export const TimelineGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
   // uploaded_at (pre-fix archive restores) — parseISO throws on numbers
   // and crashed the whole Timeline view (#485 class). The API normalizes
   // to ISO now; this guard covers stale caches and old backends.
+  // Strings go through the date hook's parser, so SQLite's zone-less
+  // 'YYYY-MM-DD HH:MM:SS' is read as UTC here exactly as the time chip reads
+  // it; a local reading filed a photo under a different day than its chip
+  // shows (issue 1815).
   const parseUploadedAt = (value: string | number) =>
-    typeof value === 'string' ? parseISO(value) : new Date(value);
+    typeof value === 'string' ? toDisplayDate(value) : new Date(value);
 
   // Group photos by date
   const groupedPhotos = useMemo(() => {
@@ -87,7 +125,7 @@ export const TimelineGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
       .map(([date, photos]) => ({
         date,
         label: photos[0] ? format(parseUploadedAt(photos[0].uploaded_at), grouping === 'month' ? 'MMMM yyyy' : grouping === 'week' ? "'Week of' MMM d, yyyy" : 'EEEE, MMMM d, yyyy') : date,
-        photos: photos.sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime())
+        photos: photos.sort((a, b) => parseUploadedAt(b.uploaded_at).getTime() - parseUploadedAt(a.uploaded_at).getTime())
       }))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [photos, grouping]);
@@ -123,8 +161,11 @@ export const TimelineGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
             )}
             
             {/* Photos grid for this date */}
-            <div className="photo-grid lg:ml-24 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {group.photos.map((photo) => {
+            <TimelineGroupGrid
+              photos={group.photos}
+              className={`photo-grid lg:ml-24 grid grid-cols-${cols(2)} sm:grid-cols-${cols(3)} lg:grid-cols-${cols(4)} gap-4`}
+              windowed={photos.length >= WINDOW_MIN_PHOTOS && group.photos.length >= TIMELINE_GROUP_WINDOW_MIN_PHOTOS}
+              renderTile={(photo) => {
                 const actualIndex = photoIndexById.get(photo.id) ?? -1;
                 return (
                   <PhotoCard
@@ -150,7 +191,8 @@ export const TimelineGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
                     imageProps={{
                       src: photo.thumbnail_url || photo.url,
                       alt: photo.filename,
-                      className: 'w-full h-full object-cover rounded-lg',
+                      // Dimmed when the client hid it from guests, as in Grid (issue 1992).
+                      className: `w-full h-full object-cover rounded-lg${isClient && onToggleVisibility && isHiddenFromGuests(photo) ? ' opacity-40' : ''}`,
                       loading: 'lazy',
                       isGallery: true,
                     }}
@@ -178,6 +220,10 @@ export const TimelineGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
                     }}
                     likeBeforeComment
                     checkboxTestId
+                    containerProps={GRID_TILE_PROPS}
+                    topLeftControl={isClient && onToggleVisibility
+                      ? <ClientVisibilityToggle photo={photo} onToggle={onToggleVisibility} />
+                      : undefined}
                     beforeOverlay={
                       <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 text-white text-xs rounded">
                         {fmtTime(photo.uploaded_at)}
@@ -192,8 +238,8 @@ export const TimelineGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
                     ) : undefined}
                   />
                 );
-              })}
-            </div>
+              }}
+            />
           </div>
         ))}
       </div>

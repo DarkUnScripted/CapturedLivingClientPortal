@@ -18,10 +18,15 @@ export interface GalleryFilterOptions {
   selectedCreditKey?: string | null;
   // Minimum own star rating (issue 1733, A3c), 1-5; null = no rating filter.
   minRating?: number | null;
+  // Scene tags (issue 1733): a photo passes when it carries ANY of them.
+  selectedTagKeys?: string[];
+  // Premium and Story: "Liked" means the viewer's own likes (`is_liked`),
+  // the same set their heart toggles and their nav count read.
+  likedIsOwn?: boolean;
 }
 export const resolveMediaType = (photo: Photo): 'photo' | 'video' =>
   photo.media_type === 'video' || photo.mime_type?.startsWith('video/') || photo.type === 'video' ? 'video' : 'photo';
-export function useGalleryFiltering({ sourcePhotos, categories, folderId, viewAll = false, selectedCategoryId, searchTerm, sortBy, sortDesc, watermarkEnabled, slug, activeFilters, activeColorFilters, mediaFilter, isGuestIdentityMode, myFeedbackPhotoIds, selectedPersonIds, peopleMatchAny, selectedCreditKey = null, minRating = null }: GalleryFilterOptions) {
+export function useGalleryFiltering({ sourcePhotos, categories, folderId, viewAll = false, selectedCategoryId, searchTerm, sortBy, sortDesc, watermarkEnabled, slug, activeFilters, activeColorFilters, mediaFilter, isGuestIdentityMode, myFeedbackPhotoIds, selectedPersonIds, peopleMatchAny, selectedCreditKey = null, minRating = null, selectedTagKeys, likedIsOwn = false }: GalleryFilterOptions) {
   return useMemo(() => {
     if (!sourcePhotos) return [];
 
@@ -60,9 +65,11 @@ export function useGalleryFiltering({ sourcePhotos, categories, folderId, viewAl
     // where there's no per-person identity to scope by.
     if (activeFilters.length > 0) {
       const matchers: Record<FeedbackFilterType, (photo: Photo) => boolean> = {
-        liked: (photo) => isGuestIdentityMode
-          ? myFeedbackPhotoIds.liked.has(photo.id)
-          : (photo.like_count || 0) > 0,
+        liked: (photo) => likedIsOwn
+          ? Boolean(photo.is_liked)
+          : isGuestIdentityMode
+            ? myFeedbackPhotoIds.liked.has(photo.id)
+            : (photo.like_count || 0) > 0,
         favorited: (photo) => isGuestIdentityMode
           ? myFeedbackPhotoIds.favorited.has(photo.id)
           : (photo.favorite_count || 0) > 0,
@@ -89,6 +96,14 @@ export function useGalleryFiltering({ sourcePhotos, categories, folderId, viewAl
           ? selectedPersonIds.some(id => ids.includes(id))
           : selectedPersonIds.every(id => ids.includes(id));
       });
+    }
+
+    // Apply the scene-tag filter (issue 1733). Several tags are OR-combined
+    // ("cake or dancing"): tags describe a scene, and two scenes rarely share
+    // a photo, so AND would mostly empty the grid. Composes with (ANDs
+    // against) every other filter.
+    if (selectedTagKeys && selectedTagKeys.length > 0) {
+      photos = photos.filter(photo => (photo.tag_keys || []).some(key => selectedTagKeys.includes(key)));
     }
 
     // Apply the "By" filter (#1561). Composes with the rest, so "Anna's photos
@@ -155,5 +170,5 @@ export function useGalleryFiltering({ sourcePhotos, categories, folderId, viewAl
     }
     
     return photos;
-  }, [sourcePhotos, categories, folderId, viewAll, selectedCategoryId, searchTerm, sortBy, sortDesc, watermarkEnabled, slug, activeFilters, activeColorFilters, mediaFilter, isGuestIdentityMode, myFeedbackPhotoIds, selectedPersonIds, peopleMatchAny, selectedCreditKey, minRating]);
+  }, [sourcePhotos, categories, folderId, viewAll, selectedCategoryId, searchTerm, sortBy, sortDesc, watermarkEnabled, slug, activeFilters, activeColorFilters, mediaFilter, isGuestIdentityMode, myFeedbackPhotoIds, selectedPersonIds, peopleMatchAny, selectedCreditKey, minRating, selectedTagKeys, likedIsOwn]);
 }

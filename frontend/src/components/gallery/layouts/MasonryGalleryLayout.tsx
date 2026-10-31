@@ -3,25 +3,29 @@ import { MessageSquare, Star, Heart } from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { PhotoCard } from '../PhotoCard';
 import { firstLookAboveChips } from '../GalleryTileBadges';
+import { ClientVisibilityToggle, isHiddenFromGuests } from '../ClientVisibilityToggle';
 import {
   calculateJustifiedLayout,
   createJustifiedPhotos,
-  type JustifiedLayoutItem,
 } from '../../../utils/justifiedLayoutCalculator';
 // Flickr's justified-layout library
 import justifiedLayout from 'justified-layout';
 import type { BaseGalleryLayoutProps } from './BaseGalleryLayout';
 import type { Photo } from '../../../types';
 import { useLazyBands } from './lazyBands';
+import { useWindowedItems, WINDOW_MIN_PHOTOS } from './rowWindow';
+import { densityColumnDelta, densitySizeFactor, useGridDensity } from '../gridDensity';
 
 // Count-style feedback indicators shared by all masonry modes (top-left).
 // `withTitles` matches the columns-mode markup, which carries title attributes.
-const FeedbackCountIndicators: React.FC<{ photo: Photo; withTitles?: boolean }> = ({ photo, withTitles = false }) => {
+// `inline` drops the corner positioning: beside the client's visibility
+// toggle they join PhotoCard's top-left row instead (issue 1992).
+const FeedbackCountIndicators: React.FC<{ photo: Photo; withTitles?: boolean; inline?: boolean }> = ({ photo, withTitles = false, inline = false }) => {
   if (!((photo.comment_count ?? 0) > 0 || (photo.average_rating ?? 0) > 0 || (photo.like_count ?? 0) > 0)) {
     return null;
   }
   return (
-    <div className="absolute top-2 left-2 flex gap-1 z-10">
+    <div className={inline ? 'flex gap-1' : 'absolute top-2 left-2 flex gap-1 z-10'}>
       {(photo.comment_count ?? 0) > 0 && (
         <div className="bg-white/90 backdrop-blur-sm rounded-full px-2 py-1 flex items-center gap-1" title={withTitles ? `${photo.comment_count ?? 0} comments` : undefined}>
           <MessageSquare className="w-3.5 h-3.5 text-accent" fill="currentColor" />
@@ -44,6 +48,16 @@ const FeedbackCountIndicators: React.FC<{ photo: Photo; withTitles?: boolean }> 
   );
 };
 
+/** Four 36px action buttons (view, download, comment, like) and their three 8px gaps. */
+const MIN_TILE_WIDTH_FOR_ACTION_ROW = 168;
+
+// Who owns the tile's top-left corner. With the client's visibility toggle
+// the count chips join its row, right of it and the colour-label dots
+// (issue 1992); without it they keep the corner as before.
+const cornerProps = (toggle: React.ReactNode, counts: React.ReactNode) => (toggle
+  ? { topLeftControl: toggle, topLeftExtras: counts }
+  : { beforeOverlay: counts });
+
 interface MasonryPhotoProps {
   photo: Photo;
   isSelected: boolean;
@@ -65,11 +79,16 @@ interface MasonryPhotoProps {
   savedIdentity?: { name: string; email: string } | null;
   onIdentitySaved?: (identity: { name: string; email: string }) => void;
   onQuickComment?: () => void;
+  onFeedbackChange?: (toggledPhotoId?: number) => void;
   // Column width for calculating proper aspect-ratio-based height
   columnWidth?: number;
   // Optimistic "I liked this" state + callback (lifted to parent)
   liked?: boolean;
   onLikeSuccess?: () => void;
+  /** The client's hide/show button (issue 1992), when the viewer is the client. */
+  visibilityToggle?: React.ReactNode;
+  /** Dim the photo: the client hid it from guests. */
+  dimmed?: boolean;
 }
 
 const MasonryPhoto: React.FC<MasonryPhotoProps> = ({
@@ -85,11 +104,14 @@ const MasonryPhoto: React.FC<MasonryPhotoProps> = ({
   slug,
   feedbackOptions,
   onQuickComment,
+  onFeedbackChange,
   columnWidth = 300,
   liked = false,
   onLikeSuccess,
   savedIdentity,
   onIdentitySaved,
+  visibilityToggle,
+  dimmed = false,
 }) => {
   const bands = useLazyBands();
   // Calculate height based on actual photo aspect ratio
@@ -132,10 +154,11 @@ const MasonryPhoto: React.FC<MasonryPhotoProps> = ({
        * explicit px height above holds the box with or without the image, so
        * a far-off tile can be released without reflowing the column.
        *
-       * No `content-visibility` here, unlike the other masonry modes: this
-       * card owns its FeedbackIdentityModal (`identityMode="self"`), and the
-       * layout containment that comes with it would make the tile the
-       * containing block of that `position: fixed` modal.
+       * No `content-visibility` here, unlike the other masonry modes. It was
+       * left out when this card rendered its FeedbackIdentityModal
+       * (`identityMode="self"`) inline: layout containment would have made
+       * the tile the containing block of that `position: fixed` modal. The
+       * modal is portalled now, so that reason is gone; not revisited here.
        */
       lazy
       inViewRootMargin={bands.load}
@@ -148,7 +171,7 @@ const MasonryPhoto: React.FC<MasonryPhotoProps> = ({
       imageProps={{
         src: photo.thumbnail_url || photo.url,
         alt: photo.filename,
-        className: 'w-full h-full object-cover rounded-lg',
+        className: `w-full h-full object-cover rounded-lg${dimmed ? ' opacity-40' : ''}`,
         loading: 'lazy',
         isGallery: true,
       }}
@@ -158,6 +181,7 @@ const MasonryPhoto: React.FC<MasonryPhotoProps> = ({
       feedbackOptions={feedbackOptions}
       slug={slug}
       onQuickComment={onQuickComment}
+      onFeedbackChange={onFeedbackChange}
       liked={liked}
       onLikeSuccess={onLikeSuccess}
       identityMode="self"
@@ -165,7 +189,10 @@ const MasonryPhoto: React.FC<MasonryPhotoProps> = ({
       onIdentitySaved={onIdentitySaved}
       likeToggleLabels
       checkboxTestId
-      beforeOverlay={feedbackEnabled ? <FeedbackCountIndicators photo={photo} withTitles /> : undefined}
+      {...cornerProps(
+        visibilityToggle,
+        feedbackEnabled ? <FeedbackCountIndicators photo={photo} withTitles inline={Boolean(visibilityToggle)} /> : undefined,
+      )}
     >
       {photo.type === 'collage' && (
         <div className="absolute bottom-2 left-2">
@@ -189,7 +216,10 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
   onPhotoSelect,
   allowDownloads = true,
   feedbackEnabled = false,
-  feedbackOptions
+  feedbackOptions,
+  onFeedbackChange,
+  isClient = false,
+  onToggleVisibility,
 }) => {
   const bands = useLazyBands();
   const { theme } = useTheme();
@@ -211,15 +241,65 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
     setLikedPhotoIds(new Set(photos.filter(p => p.is_liked).map(p => p.id)));
     likedSeededRef.current = true;
   }, [photos]);
+  // Toggle, not add — the /feedback like endpoint toggles server-side, so
+  // click 2 on a liked photo unlikes it; the optimistic UI must follow suit
+  // (#590).
+  const toggleLiked = (photoId: number) => {
+    setLikedPhotoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(photoId)) next.delete(photoId);
+      else next.add(photoId);
+      return next;
+    });
+  };
+  // The tile feedback wiring of columns mode (MasonryPhoto), for the PhotoCards
+  // the rows, flickr and quilted modes render directly (issue 1733).
+  // `tileWidth` is the layout's px width where it computes one: these modes
+  // put a portrait next to a landscape at one row height, so a tile can be
+  // narrower than the four action buttons. Such a tile wraps them onto a
+  // second line, which is where the rating row would sit, so it leaves the
+  // stars to the lightbox, as PhotoCard itself does on a short tile.
+  const tileFeedbackProps = (photo: Photo, index: number, tileWidth?: number) => {
+    const narrow = tileWidth !== undefined && tileWidth < MIN_TILE_WIDTH_FOR_ACTION_ROW;
+    return {
+      overlayBaseClassName: `absolute inset-0 bg-black/40 transition-opacity duration-200 rounded-lg flex items-center justify-center gap-2${narrow ? ' flex-wrap content-center' : ''}`,
+      feedbackEnabled,
+      feedbackOptions: narrow && feedbackOptions ? { ...feedbackOptions, allowRatings: false } : feedbackOptions,
+      slug,
+      onQuickComment: () => onOpenPhotoWithFeedback && onOpenPhotoWithFeedback(index),
+      onFeedbackChange,
+      liked: likedPhotoIds.has(photo.id),
+      onLikeSuccess: () => toggleLiked(photo.id),
+      identityMode: 'self' as const,
+      savedIdentity,
+      onIdentitySaved: setSavedIdentity,
+      likeToggleLabels: true,
+    };
+  };
+  // The client's per-photo hide/show button and dimmed hidden photos, as in
+  // Grid (issue 1992). Every mode puts the button in the tile's top-left.
+  const showVisibilityToggle = isClient && Boolean(onToggleVisibility);
+  const visibilityToggle = (photo: Photo) => (isClient && onToggleVisibility
+    ? <ClientVisibilityToggle photo={photo} onToggle={onToggleVisibility} />
+    : null);
+  const dimmed = (photo: Photo) => showVisibilityToggle && isHiddenFromGuests(photo);
+  const dimClass = (photo: Photo) => (dimmed(photo) ? ' opacity-40' : '');
   const gallerySettings = theme.gallerySettings || {};
   const gutter = gallerySettings.masonryGutter || 16;
-  const mode = gallerySettings.masonryMode || 'columns';
-  const targetRowHeight = gallerySettings.masonryRowHeight || 250;
+  // 'justified' is the picker's "Google Photos" option: the same justified rows.
+  const storedMode = gallerySettings.masonryMode || 'columns';
+  const mode = storedMode === 'justified' ? 'rows' : storedMode;
+  // The viewer's density (issue 1733, E4): a column more or less in columns
+  // mode, a shorter or taller row (or quilted cell) in the others.
+  const density = useGridDensity();
+  const sizeFactor = densitySizeFactor(density);
+  const targetRowHeight = Math.round((gallerySettings.masonryRowHeight || 250) * sizeFactor);
+  const quiltedCell = Math.round(200 * sizeFactor);
   const lastRowBehavior = gallerySettings.masonryLastRowBehavior || 'left';
   const scale = gallerySettings.thumbnailScale || 'md';
 
   const scaleOffsets: Record<string, number> = { xs: 3, sm: 1, md: 0, lg: -1, xl: -2 };
-  const applyScale = (cols: number) => Math.max(1, cols + (scaleOffsets[scale] ?? 0));
+  const applyScale = (cols: number) => Math.max(1, cols + (scaleOffsets[scale] ?? 0) + densityColumnDelta(density));
 
   // Apply scale to columns only in columns mode
   const scaledColumns = mode === 'columns' ? applyScale(columns) : columns;
@@ -283,14 +363,15 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
     });
   }, [mode, photos, containerWidth, targetRowHeight, gutter, lastRowBehavior]);
 
-  // Create a map for quick lookup of layout items by photo ID (rows mode)
-  const layoutItemMap = useMemo(() => {
-    const map = new Map<number, JustifiedLayoutItem>();
-    for (const item of rowsLayout.items) {
-      map.set(item.photoId, item);
-    }
-    return map;
-  }, [rowsLayout.items]);
+  // Rows mode mounts only the rows near the viewport in a large gallery
+  // (issue 1733); the other modes never have items here.
+  const { visible: visibleRowItems } = useWindowedItems(
+    containerRef,
+    rowsLayout.items,
+    containerWidth,
+    mode === 'rows' && photos.length >= WINDOW_MIN_PHOTOS,
+    targetRowHeight,
+  );
 
   // Calculate Flickr justified layout
   const flickrLayout = useMemo(() => {
@@ -395,9 +476,10 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
               <div key={photo.id} className="aspect-square bg-border-token rounded-lg animate-pulse" />
             ))}
           </div>
-        ) : photos.map((photo, index) => {
-          const layoutItem = layoutItemMap.get(photo.id);
-          if (!layoutItem) return null;
+        ) : visibleRowItems.map((layoutItem) => {
+          const index = photoIndexById.get(layoutItem.photoId);
+          if (index === undefined) return null;
+          const photo = photos[index];
 
           return (
             <PhotoCard
@@ -428,14 +510,17 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
               imageProps={{
                 src: photo.thumbnail_url || photo.url,
                 alt: photo.filename,
-                className: 'w-full h-full object-cover rounded-lg transition-transform duration-300 group-hover:scale-[1.02]',
+                className: `w-full h-full object-cover rounded-lg transition-transform duration-300 group-hover:scale-[1.02]${dimClass(photo)}`,
                 loading: 'lazy',
                 isGallery: true,
               }}
-              overlayBaseClassName="absolute inset-0 bg-black/40 transition-opacity duration-200 rounded-lg flex items-center justify-center gap-2"
               actionVariant="dark"
               allowDownloads={allowDownloads}
-              beforeOverlay={feedbackEnabled ? <FeedbackCountIndicators photo={photo} /> : undefined}
+              {...tileFeedbackProps(photo, index, layoutItem.width)}
+              {...cornerProps(
+                visibilityToggle(photo),
+                feedbackEnabled ? <FeedbackCountIndicators photo={photo} inline={showVisibilityToggle} /> : undefined,
+              )}
             />
           );
         })}
@@ -492,14 +577,17 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
               imageProps={{
                 src: photo.thumbnail_url || photo.url,
                 alt: photo.filename,
-                className: 'w-full h-full object-cover rounded-lg transition-transform duration-300 group-hover:scale-[1.02]',
+                className: `w-full h-full object-cover rounded-lg transition-transform duration-300 group-hover:scale-[1.02]${dimClass(photo)}`,
                 loading: 'lazy',
                 isGallery: true,
               }}
-              overlayBaseClassName="absolute inset-0 bg-black/40 transition-opacity duration-200 rounded-lg flex items-center justify-center gap-2"
               actionVariant="dark"
               allowDownloads={allowDownloads}
-              beforeOverlay={feedbackEnabled ? <FeedbackCountIndicators photo={photo} /> : undefined}
+              {...tileFeedbackProps(photo, index, box.width)}
+              {...cornerProps(
+                visibilityToggle(photo),
+                feedbackEnabled ? <FeedbackCountIndicators photo={photo} inline={showVisibilityToggle} /> : undefined,
+              )}
             >
               {photo.type === 'collage' && (
                 <div className="absolute bottom-2 left-2">
@@ -536,8 +624,8 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
         className="photo-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-          gridAutoRows: '200px',
+          gridTemplateColumns: `repeat(auto-fill, minmax(${quiltedCell}px, 1fr))`,
+          gridAutoRows: `${quiltedCell}px`,
           gap: `${gutter}px`,
           gridAutoFlow: 'dense', // Fill gaps automatically
         }}
@@ -556,7 +644,7 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
               onDownload={(e) => onDownload(photo, e)}
               onToggleSelect={() => onPhotoSelect && onPhotoSelect(photo.id)}
               className={`photo-card group cursor-pointer relative overflow-hidden rounded-lg bg-elevated ${spanClasses}`}
-              // Issue 1733: the grid's 200px rows and the span classes size
+              // Issue 1733: the grid's fixed-height rows and the span classes size
               // the cell, not the image, so the box survives both a skipped
               // tile and a released one. No intrinsic size, as in Grid.
               style={{ contentVisibility: 'auto' }}
@@ -566,14 +654,19 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
               imageProps={{
                 src: photo.thumbnail_url || photo.url,
                 alt: photo.filename,
-                className: 'w-full h-full object-cover transition-transform duration-300 group-hover:scale-105',
+                className: `w-full h-full object-cover transition-transform duration-300 group-hover:scale-105${dimClass(photo)}`,
                 loading: 'lazy',
                 isGallery: true,
               }}
-              overlayBaseClassName="absolute inset-0 bg-black/40 transition-opacity duration-200 flex items-center justify-center gap-2"
               actionVariant="dark"
               allowDownloads={allowDownloads}
-              beforeOverlay={feedbackEnabled ? <FeedbackCountIndicators photo={photo} /> : undefined}
+              {...tileFeedbackProps(photo, index)}
+              // After the spread: the quilted cell clips with its own rounding.
+              overlayBaseClassName="absolute inset-0 bg-black/40 transition-opacity duration-200 flex items-center justify-center gap-2"
+              {...cornerProps(
+                visibilityToggle(photo),
+                feedbackEnabled ? <FeedbackCountIndicators photo={photo} inline={showVisibilityToggle} /> : undefined,
+              )}
             >
               {photo.type === 'collage' && (
                 <div className="absolute bottom-2 left-2">
@@ -630,21 +723,14 @@ export const MasonryGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
                 slug={slug}
                 feedbackOptions={feedbackOptions}
                 onQuickComment={() => onOpenPhotoWithFeedback && onOpenPhotoWithFeedback(originalIndex)}
+                onFeedbackChange={onFeedbackChange}
                 columnWidth={columnWidth}
                 savedIdentity={savedIdentity}
                 onIdentitySaved={setSavedIdentity}
                 liked={likedPhotoIds.has(photo.id)}
-                onLikeSuccess={() => {
-                  // Toggle, not add — the /feedback like endpoint toggles
-                  // server-side, so click 2 on a liked photo unlikes it;
-                  // the optimistic UI must follow suit (#590).
-                  setLikedPhotoIds((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(photo.id)) next.delete(photo.id);
-                    else next.add(photo.id);
-                    return next;
-                  });
-                }}
+                onLikeSuccess={() => toggleLiked(photo.id)}
+                visibilityToggle={visibilityToggle(photo)}
+                dimmed={dimmed(photo)}
               />
             );
           })}

@@ -47,6 +47,8 @@ export interface InvoiceSummary {
      *  customer (no portal access). Drives the Passive badge that
      *  appears next to the customer label across editor + lists. */
     isPassive?: boolean;
+    /** No administrative emails (migration 300): send becomes Issue. */
+    noAdminEmails?: boolean;
   };
   sourceQuoteId: number | null;
   /** Migration 130 — set by contractService.convertToInvoiceOnly when
@@ -61,6 +63,10 @@ export interface InvoiceSummary {
    *  "From contract LBM-C-2026-0010" rather than "From contract #10". */
   sourceContractNumber?: string | null;
   eventId: number | null;
+  /** Migration 315: the project it was created in or attached to. */
+  projectId?: number | null;
+  /** With `attachTo`: why it may not join that project (an API code), or null. */
+  attachRefusal?: string | null;
   /** Inline event snapshot (migration 123). Free-text label for the
    *  event the invoice relates to. Persists independently of the
    *  events FK so renames don't retroactively change historical
@@ -191,6 +197,8 @@ export interface InvoiceCreatePayload {
   customerAccountId: number;
   sourceQuoteId?: number;
   eventId?: number;
+  /** Create only: the project the invoice is made from (migration 315). */
+  projectId?: number;
   language?: string;
   currency?: string;
   issueDate?: string;
@@ -251,6 +259,8 @@ export const billsService = {
      *  main list hides by default (migration 128). Only the Bills list
      *  opts in; pickers/sub-lists leave it off. */
     includeDrafts?: boolean;
+    /** Adds `attachRefusal` for this project to each row (the project page's add window). */
+    attachTo?: number;
   } = {}): Promise<InvoiceListResponse> {
     const { data } = await api.get('/admin/invoices', {
       params: {
@@ -281,7 +291,7 @@ export const billsService = {
    * re-bill proof selection from the Send dialog; omit to let the resolved
    * per-customer/global default decide all-or-none.
    */
-  async send(id: number, proofInboundIds?: number[]): Promise<{ sent: true }> {
+  async send(id: number, proofInboundIds?: number[]): Promise<{ sent: boolean; alreadySent: boolean }> {
     const { data } = await api.post(`/admin/invoices/${id}/send`,
       proofInboundIds !== undefined ? { proofInboundIds } : undefined);
     return data.data || data;

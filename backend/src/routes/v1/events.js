@@ -20,10 +20,12 @@ const sharp = require('../../services/isolatedSharp');
 const { body, query, validationResult } = require('express-validator');
 const { safeValidationErrors } = require('../../utils/routeHelpers');
 const { db, logActivity } = require('../../database/db');
+const { livePhotos } = require('../../utils/photoVisibility');
 const { parseBooleanInput } = require('../../utils/parsers');
 const { apiTokenAuth, requireApiScope } = require('../../middleware/apiTokenAuth');
 const { requireEventOwnership, scopeEventsQuery } = require('../../middleware/ownership');
 const { holdsForReview, adminUploadColumns } = require('../../services/uploadReviewService');
+const { claimPromotion } = require('../../services/watchFolderClaims');
 // GHSA-9697: migration 081 defines a token's effective permissions as the
 // INTERSECTION of the owner's role permissions and the token's scope flags.
 // requireApiScope only ever checked the scope half — so a token minted while
@@ -36,6 +38,7 @@ const { requirePermission } = require('../../middleware/permissions');
 const { buildShareLinkVariants } = require('../../services/shareLinkService');
 const {
   generateThumbnail,
+  extractCaptureDate,
   ensurePreviewImage,
   ensurePreviewImageAtWidth,
   normalizeTierWidth,
@@ -48,10 +51,13 @@ const { formatBoolean } = require('../../utils/dbCompat');
 
 const { isValidEventType } = require('../../services/eventTypeService');
 const { replacePhoto } = require('../../services/photoReplacementService');
-const { getMaxFileSizeBytes, DEFAULT_MAX_FILE_SIZE_MB } = require('../../services/uploadSettings');
+const { getMaxFileSizeBytes, DEFAULT_MAX_FILE_SIZE_MB, getMaxVideoSizeBytes, DEFAULT_MAX_VIDEO_SIZE_MB, getAllowedMimeTypes } = require('../../services/uploadSettings');
+const { isVideoMimeType } = require('../../services/videoProcessor');
 const { withPublicUpload } = require('../../middleware/publicUploadStream');
 const { createUploadFileGuard } = require('../../utils/uploadAdmissionType');
 const uploadQuota = require('../../services/publicUploadQuota');
+const { validateFileContent, validateFileType, normalizeUploadMimeType, ALLOWED_MEDIA_TYPES } = require('../../utils/fileSecurityUtils');
+const { validateUploadedFiles } = require('../../middleware/uploadValidation');
 const downloadZipService = require('../../services/downloadZipService');
 const { PhotoFilterBuilder } = require('../../utils/photoFilterBuilder');
 const { PhotoExportService } = require('../../services/photoExportService');
@@ -60,6 +66,7 @@ const feedbackService = require('../../services/feedbackService');
 const archiver = require('archiver');
 const { Readable } = require('stream');
 const { getStorage } = require('../../services/storage');
+const { isStorageNotFoundError } = require('../../services/storage/storageErrors');
 const { resolvePhotoStorageKey, resolvePhotoFilePath } = require('../../services/photoResolver');
 const { pickRawDownloadName } = require('../../services/downloadFilenameService');
 const { buildContentDisposition, sanitizeForZipEntry } = require('../../utils/filenameSanitizer');
@@ -82,15 +89,21 @@ const photoExportService = new PhotoExportService();
 const buildPhotoUpload = (maxFileSizeBytes, { storage, streamHandler, rejectBody }) => multer({
   storage,
   streamHandler,
+  defParamCharset: 'utf8', // multer's latin1 default turns UTF-8 names into mojibake
   // Only category_id and replaces_photo_id are consumed by this endpoint.
   limits: { fileSize: maxFileSizeBytes, files: 1, fields: 2, fieldSize: 1024,
     parts: 3, headerPairs: 2000, fieldArrayIndexLimit: 0 },
-  fileFilter: (_req, file, cb) => {
-    // Preserve v1's image-only contract; unlike the UI it accepts image types
+  fileFilter: (req, file, cb) => {
+    // Preserve v1's image contract; unlike the UI it accepts image types
     // understood by its processing path without the UI's extension allow-list.
+    // A video takes the UI's gate instead (Lightroom plugin issue 8): only a
+    // type the admin enabled in general_allowed_file_types, extension matching.
     if (/^image\//.test(file.mimetype)) cb(null, true);
+    else if (isVideoMimeType(file.mimetype) && validateFileType(file.originalname, file.mimetype, req.allowedMimeTypes)) cb(null, true);
     else {
-      const error = new Error('Only image uploads are accepted on this endpoint');
+      const error = isVideoMimeType(file.mimetype)
+        ? Object.assign(new Error('This file type is not enabled on this server'), { status: 400, code: 'UPLOAD_TYPE_REJECTED' })
+        : new Error('Only image uploads are accepted on this endpoint');
       rejectBody(error); cb(error);
     }
   },
@@ -136,7 +149,7 @@ const buildPhotoUpload = (maxFileSizeBytes, { storage, streamHandler, rejectBody
  *               enable_devtools_protection: { type: boolean, nullable: true, description: "Block right-click / devtools shortcuts in the gallery. When omitted, falls back to the global enable_devtools_protection setting." }
  *               protection_level: { type: string, nullable: true, enum: [basic, standard, enhanced, maximum], description: "Image protection level. When omitted, falls back to the global default_protection_level setting." }
  *               use_canvas_rendering: { type: boolean, nullable: true, description: "Render gallery images to a canvas instead of an img tag. When omitted, falls back to the global enable_canvas_rendering setting." }
- *               image_quality: { type: integer, minimum: 1, maximum: 100, nullable: true, description: "Served image quality percentage. When omitted, falls back to the global default_image_quality setting." }
+ *               image_quality: { type: integer, minimum: 1, maximum: 100, nullable: true, description: "Stored for compatibility only; it does not change how gallery images are encoded. When omitted, the global default_image_quality setting is stored, or 85 if that is unset." }
  *               hero_logo_visible: { type: boolean, nullable: true, description: "Show event logo in the hero block. When omitted, falls back to the global branding_logo_display_hero setting." }
  *               hero_logo_size: { type: string, nullable: true, enum: [small, medium, large, xlarge], description: "Hero logo size. When omitted, falls back to the global branding_logo_size setting." }
  *               hero_logo_position: { type: string, nullable: true, enum: [top, center, bottom], description: "Hero logo position. Defaults to 'top' (not settings-backed — see migration 084)." }
@@ -373,7 +386,15 @@ router.get('/events/:id', apiTokenAuth, requireApiScope('read'), requirePermissi
  * /events/{id}/photos:
  *   post:
  *     tags: [Photos]
- *     summary: Upload a single photo to an event
+ *     summary: Upload a single photo or video to an event
+ *     description: |
+ *       Any image/* type is accepted, up to the per-file photo cap
+ *       (general_max_file_size_mb). A video (mp4/m4v, webm, mov, avi) is
+ *       accepted only when its extension is enabled in the allowed file types
+ *       setting (general_allowed_file_types), up to the video cap
+ *       (general_max_video_size_mb). A video is stored right away and its
+ *       poster frame and web copy are made in the background, so its
+ *       thumbnail_path is null in the response.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -388,7 +409,13 @@ router.get('/events/:id', apiTokenAuth, requireApiScope('read'), requirePermissi
  *             type: object
  *             required: [photo]
  *             properties:
- *               photo: { type: string, format: binary }
+ *               photo: { type: string, format: binary, description: "The image or video file." }
+ *               replaces_photo_id:
+ *                 type: integer
+ *                 description: |
+ *                   Optional. Replaces the file of this photo of the event,
+ *                   keeping its id. A video replaces only a video and an
+ *                   image only an image.
  *               category_id:
  *                 type: integer
  *                 description: |
@@ -413,7 +440,8 @@ router.get('/events/:id', apiTokenAuth, requireApiScope('read'), requirePermissi
  *                 thumbnail_path: { type: string, nullable: true }
  *                 size_bytes: { type: integer }
  *                 category_id: { type: integer, nullable: true }
- *       400: { description: No file or invalid type }
+ *                 media_type: { type: string, enum: [image, video] }
+ *       400: { description: "No file, an invalid or disabled type, a file over its cap, or a replacement by another media type" }
  *       404: { description: Event not found, or replaces_photo_id not in this event }
  */
 router.post(
@@ -432,29 +460,78 @@ router.post(
     let maxFileSizeBytes;
     try { maxFileSizeBytes = await getMaxFileSizeBytes(); }
     catch { maxFileSizeBytes = DEFAULT_MAX_FILE_SIZE_MB * 1024 * 1024; }
+    let maxVideoSizeBytes;
+    try { maxVideoSizeBytes = await getMaxVideoSizeBytes(); }
+    catch { maxVideoSizeBytes = DEFAULT_MAX_VIDEO_SIZE_MB * 1024 * 1024; }
+    // The type is not known when multer is built: it takes the larger cap and
+    // the file guard holds each file to its own, as the admin upload does.
+    const maxUploadBytes = Math.max(maxFileSizeBytes, maxVideoSizeBytes);
+    // Read by the file filter; falls back to the defaults itself.
+    req.allowedMimeTypes = await getAllowedMimeTypes();
     await withPublicUpload(req, res, {
-      eventId, mode: 'admin', accountId: req.admin.id, maxFiles: 1, maxFileBytes: maxFileSizeBytes, fileField: 'photo',
+      eventId, mode: 'admin', accountId: req.admin.id, maxFiles: 1, maxFileBytes: maxUploadBytes, fileField: 'photo',
       fileExtension: file => {
         const extension = path.extname(file.originalname).toLowerCase();
         return /^\.[a-z0-9]{1,10}$/i.test(extension) ? extension : '';
       },
-      fileGuard: file => createUploadFileGuard(file, maxFileSizeBytes, maxFileSizeBytes),
+      fileGuard: file => createUploadFileGuard(file, maxFileSizeBytes, maxVideoSizeBytes),
       formatError: err => ({ status: 400, body: { error: err.code === 'LIMIT_FILE_SIZE'
-        ? `File too large. Maximum size is ${Math.floor(maxFileSizeBytes / (1024 * 1024))} MB per file.`
+        ? `File too large. Maximum size is ${Math.floor(maxUploadBytes / (1024 * 1024))} MB per file.`
         : err instanceof multer.MulterError ? `Upload error: ${err.message}` : 'Only image uploads are accepted on this endpoint' } }),
-    }, options => buildPhotoUpload(maxFileSizeBytes, options),
+    }, options => buildPhotoUpload(maxUploadBytes, options),
     async (_session, reply) => handleV1PhotoUpload(req, reply));
   }
 );
+
+// Whether Sharp reads the file as an image with dimensions. A busy image
+// worker says nothing about the file, so it passes; a resource limit is
+// thrown like the metadata read further down throws it.
+async function readsAsImage(filePath) {
+  try {
+    const meta = await sharp(filePath).metadata();
+    return Boolean(meta && meta.width && meta.height);
+  } catch (error) {
+    const policy = require('../../services/imageResourcePolicy');
+    if (policy.isTransient(error)) return true;
+    if (policy.isResourceError(error)) throw error;
+    return false;
+  }
+}
 
 async function handleV1PhotoUpload(req, res) {
   let tempPath = null;
   let object;
   let promotionSettled = false;
   let storage;
+  let releaseClaim = null;
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded under field "photo"' });
     tempPath = req.file.path;
+
+    // The same content check the admin multipart upload applies: the bytes
+    // must match the declared type, and an image must decode. The declared
+    // image/* type says nothing about the file. v1 takes any image/* type
+    // (TIFF, AVIF, ...); one the signature table does not know has to be an
+    // image Sharp can read instead. A video passed the file filter only as a
+    // type the table knows, so it gets the signature check and no decode.
+    const declaredType = normalizeUploadMimeType(req.file.originalname, req.file.mimetype);
+    const videoUpload = isVideoMimeType(declaredType);
+    const contentMatches = ALLOWED_MEDIA_TYPES[declaredType]
+      ? await validateFileContent(tempPath, declaredType)
+      : await readsAsImage(tempPath);
+    if (!contentMatches) {
+      await fs.unlink(tempPath).catch(() => {});
+      return res.status(400).json({ error: `File content does not match declared type: ${req.file.originalname}` });
+    }
+    const checked = {
+      files: [{ originalname: req.file.originalname, path: tempPath, mimetype: declaredType }],
+      publicUploadReservation: req.publicUploadReservation,
+    };
+    await validateUploadedFiles(checked, res, () => {});
+    if (checked.files.length === 0) {
+      await fs.unlink(tempPath).catch(() => {});
+      return res.status(400).json({ error: `Invalid image file: ${req.file.originalname}` });
+    }
 
     const event = await db('events').where({ id: req.params.id }).first();
     if (!event) {
@@ -528,7 +605,7 @@ async function handleV1PhotoUpload(req, res) {
         tempPath = null;
         return res.status(400).json({ error: 'replaces_photo_id must be an integer' });
       }
-      const target = await db('photos')
+      const target = await livePhotos(db)
         .where({ id: replacesId, event_id: event.id })
         .first();
       if (!target) {
@@ -536,6 +613,17 @@ async function handleV1PhotoUpload(req, res) {
         tempPath = null;
         return res.status(404).json({
           error: `No photo ${replacesId} in event ${event.id}`,
+        });
+      }
+      // A video in a photo's place (or the reverse) changes what the row is,
+      // not just its file; the plugin sends the id of whatever it uploaded.
+      // isVideo is falsy, not false, for an image with no mime_type (a restored
+      // legacy archive), so compare booleans.
+      if (Boolean(isVideo(target)) !== videoUpload) {
+        await fs.unlink(tempPath).catch(() => {});
+        tempPath = null;
+        return res.status(400).json({
+          error: videoUpload ? 'A video can only replace a video' : 'An image can only replace an image',
         });
       }
 
@@ -599,31 +687,51 @@ async function handleV1PhotoUpload(req, res) {
     // Read sharp metadata + generate thumbnail FROM the local temp file
     // before uploading the original through the storage backend. (Same
     // ordering as adminPhotos.js so sharp/ffmpeg always have a real fs path.)
+    // A video skips all of it: its row is queued like an admin upload's, and
+    // the background worker (photoProcessor.processPhoto) makes the poster,
+    // reads the metadata and queues the web copy.
     let width = null;
     let height = null;
-    try {
-      const meta = await sharp(tempPath).metadata();
-      // Oriented, not raw — see imageProcessor.orientedDimensions (#1185).
-      ({ width, height } = require('../../services/imageProcessor').orientedDimensions(meta));
-    } catch (error) {
-      if (require('../../services/imageResourcePolicy').isResourceError(error)) throw error;
-    }
-
-    // Credit from EXIF (#1561), read before the temp file is moved away.
-    const credit = await require('../../services/photoCredit').resolveCredit({ localPath: tempPath });
-
+    let credit = {};
+    let exif = {};
+    let capturedAt = null;
     let thumbRel = null;
-    try {
-      thumbRel = await generateThumbnail(tempPath);
-    } catch (err) {
-      if (require('../../services/imageResourcePolicy').isResourceError(err)) throw err;
-      logger.warn('v1 thumbnail generation failed', { err: err.message });
+    const thumbMeta = {};
+    if (!videoUpload) {
+      try {
+        const meta = await sharp(tempPath).metadata();
+        // Oriented, not raw — see imageProcessor.orientedDimensions (#1185).
+        ({ width, height } = require('../../services/imageProcessor').orientedDimensions(meta));
+      } catch (error) {
+        if (require('../../services/imageResourcePolicy').isResourceError(error)) throw error;
+      }
+
+      // Credit from EXIF (#1561), read before the temp file is moved away.
+      credit = await require('../../services/photoCredit').resolveCredit({ localPath: tempPath });
+      // Camera details (issue 1733, D1), from the same temp file.
+      exif = await require('../../services/photoExif').exifColumn(tempPath);
+      // Capture date, for the same reason: the worker never runs for this row.
+      capturedAt = await extractCaptureDate(tempPath);
+
+      try {
+        thumbRel = await generateThumbnail(tempPath, { meta: thumbMeta });
+      } catch (err) {
+        if (require('../../services/imageResourcePolicy').isResourceError(err)) throw err;
+        logger.warn('v1 thumbnail generation failed', { err: err.message });
+      }
     }
+
+    // Content hash (issue 1733, C2), stored for the admin uploader's
+    // duplicate check; this route itself refuses nothing.
+    const contentSha256 = await require('../../services/photoDuplicates').sha256File(tempPath);
 
     // Upload the original via the storage backend (local fs OR S3),
     // then drop the multer temp file.
     storage = getStorage();
     object = await uploadQuota.prepareObject(req.publicUploadReservation, finalKey, stat.size);
+    // Held until the row exists, so the file watcher does not import the
+    // file first (issue 1970).
+    releaseClaim = claimPromotion(finalKey);
     await storage.putFromFile(finalKey, tempPath, { contentType: req.file.mimetype });
     promotionSettled = true;
     const promoted = await storage.stat(finalKey);
@@ -642,31 +750,48 @@ async function handleV1PhotoUpload(req, res) {
       source_filename: req.file.originalname,
       path: relPath,
       thumbnail_path: thumbRel,
+      thumb_hash: thumbMeta.thumbHash || null,
       type: photoType,
       category_id: folderId ? null : categoryId,
       folder_id: folderId,
       size_bytes: stat.size,
+      content_sha256: contentSha256,
+      captured_at: capturedAt ? capturedAt.toISOString() : null,
       width,
       height,
-      media_type: 'image',
+      media_type: videoUpload ? 'video' : 'image',
       mime_type: req.file.mimetype,
+      ...(videoUpload ? { processing_status: 'pending' } : {}),
       uploaded_at: new Date().toISOString(),
       uploaded_by: 'admin',
       // Retain uploader identity and held-review visibility with the quota commit.
       ...uploadColumns,
-      ...credit
+      ...credit,
+      ...exif
     };
     const id = await uploadQuota.commitObject(object, 'photo', async conn => {
       const insertResult = await conn('photos').insert(photoData).returning('id');
       return insertResult[0]?.id || insertResult[0];
     });
+    releaseClaim();
+
+    // Scene tagging (issue 1733): this route writes a finished row itself.
+    // A video is neither finished nor tagged.
+    if (!videoUpload) {
+      try {
+        await require('../../services/tagSettings').enqueueFinishedPhotos(event.id, [id]);
+      } catch (e) {
+        logger.warn(`v1 upload: tag enqueue failed for photo ${id}`, { error: e.message });
+      }
+    }
 
     await logActivity('photo_uploaded', { via: 'api_v1', filename: finalName }, event.id, {
       type: 'admin', id: req.admin.id, name: req.admin.username
     });
 
-    // Held uploads fire only on approval (issue 743).
-    if (!uploadColumns.moderation_status) {
+    // Held uploads fire only on approval (issue 743). A video's fires from
+    // the worker once it is processed, as for an admin upload.
+    if (!uploadColumns.moderation_status && !videoUpload) {
       // Webhook (#327): one event per uploaded photo so receivers get a
       // 1:1 stream they can react to.
       try {
@@ -684,7 +809,8 @@ async function handleV1PhotoUpload(req, res) {
       path: relPath,
       thumbnail_path: thumbRel,
       size_bytes: stat.size,
-      category_id: categoryId
+      category_id: categoryId,
+      media_type: videoUpload ? 'video' : 'image'
     });
   } catch (error) {
     if (object) {
@@ -696,6 +822,8 @@ async function handleV1PhotoUpload(req, res) {
     logger.error('v1 POST /events/:id/photos failed', { error: error.message });
     if (tempPath) await fs.unlink(tempPath).catch(() => {});
     res.status(500).json({ error: 'Failed to upload photo' });
+  } finally {
+    releaseClaim?.();
   }
 }
 
@@ -930,7 +1058,7 @@ router.get(
       // not filter. Filter to a page of ids first, then enrich just those —
       // which also keeps the per-colour tally query bounded by page size.
       const filterBuilder = new PhotoFilterBuilder(
-        db('photos').select('photos.id'),
+        livePhotos(db).select('photos.id'),
         eventId,
         identityMode
       );
@@ -961,7 +1089,7 @@ router.get(
       // the scoping is local to the query rather than inherited from two
       // statements above.
       const mediaRows = pageIds.length
-        ? await db('photos').where('event_id', eventId).whereIn('id', pageIds)
+        ? await livePhotos(db).where('event_id', eventId).whereIn('id', pageIds)
           .select('id', 'media_type', 'mime_type', 'processing_status', 'moderation_status')
         : [];
       const mediaById = new Map(mediaRows.map((r) => [r.id, r]));
@@ -1455,7 +1583,7 @@ router.get(
         if (ids.length > MAX_ZIP_IDS) {
           return res.status(400).json({ error: `At most ${MAX_ZIP_IDS} ids per request`, code: 'TOO_MANY_PHOTO_IDS' });
         }
-        const owned = await db('photos').where('event_id', event.id).whereIn('id', ids).count('id as count').first();
+        const owned = await livePhotos(db).where('event_id', event.id).whereIn('id', ids).count('id as count').first();
         if (Number(owned?.count || 0) !== ids.length) {
           // Deliberately not naming the offenders: an id that isn't in this
           // event is either a typo or someone else's photo.
@@ -1467,7 +1595,7 @@ router.get(
       const { identity_mode: identityMode } =
         await feedbackService.getEventFeedbackSettings(event.id);
       const selection = () => {
-        const builder = new PhotoFilterBuilder(db('photos'), event.id, identityMode);
+        const builder = new PhotoFilterBuilder(livePhotos(db), event.id, identityMode);
         builder.applyFilters(buildPhotoFilters(req));
         if (ids) builder.getQuery().whereIn('photos.id', ids);
         return builder;
@@ -1803,7 +1931,7 @@ router.get(
 
       // One answer for unknown, malformed and other-event ids.
       const photo = isRowId(req.params.photoId)
-        ? await db('photos').where({ id: Number(req.params.photoId), event_id: event.id }).first()
+        ? await livePhotos(db).where({ id: Number(req.params.photoId), event_id: event.id }).first()
         : null;
       if (!photo) return res.status(404).json({ error: 'Photo not found' });
 
@@ -1978,7 +2106,7 @@ router.get(
       if (!event) return;
 
       const photo = isRowId(req.params.photoId)
-        ? await db('photos').where({ id: Number(req.params.photoId), event_id: event.id }).first()
+        ? await livePhotos(db).where({ id: Number(req.params.photoId), event_id: event.id }).first()
         : null;
       if (!photo) return res.status(404).json({ error: 'Photo not found' });
 
@@ -2035,7 +2163,16 @@ router.get(
       const stat = await getStorage().stat(previewPath);
       if (!stat) return unavailable();
 
-      const stream = await getStorage().get(previewPath);
+      let stream;
+      try {
+        stream = await getStorage().get(previewPath);
+      } catch (error) {
+        // Removed since the stat (issue 2129), which S3's get() reports by
+        // rejecting: the failed stat's answer, not a 500. The local stream
+        // opens lazily and is answered by pipeStreamToResponse.
+        if (isStorageNotFoundError(error)) return unavailable();
+        throw error;
+      }
       // Left while the read was opening: pipeStreamToResponse's cleanup would
       // never run for this stream.
       if (res.destroyed) {

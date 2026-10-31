@@ -74,6 +74,7 @@ const FILES_ONLY_FIELD_LIMITS = { fields: 0, fieldSize: 1 };
 function buildAdminUploader(maxSizeBytes, policy, fieldLimits) {
   return multer({
     storage: tempStorage,
+    defParamCharset: 'utf8', // multer's latin1 default turns UTF-8 names into mojibake
     // CVE-2026-82333: files arrive as repeated `files` parts via .array(),
     // not bracket-indexed field names like `files[0]` — no legitimate
     // field name uses array-index syntax at all. Reject any that do.
@@ -243,7 +244,7 @@ router.post('/',
     const kind = transferService.normalizeKind(b.kind);
     const isRequest = kind === transferService.KIND_REQUEST;
     const photoIds = parseJsonArrayField(b.photoIds)
-      .map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 5000);
+      .map(Number).filter((n) => Number.isInteger(n) && n > 0 && n <= 2147483647).slice(0, 5000);
     const recipientEmails = parseJsonArrayField(b.recipientEmails)
       .map((e) => String(e || '').trim()).filter(Boolean).slice(0, 100);
     const deliveryMethod = b.deliveryMethod === 'email' ? 'email' : 'link';
@@ -267,7 +268,12 @@ router.post('/',
     // them, and without this the row is created empty and — on
     // deliveryMethod 'email' — a "your files are ready" mail goes out for a
     // transfer holding nothing.
-    if (!isRequest && photoIds.length === 0 && !(req.files || []).length) {
+    // Picks that name no photo this admin may send (another event's, or
+    // none at all) leave a transfer just as empty (issue 2086).
+    const usablePhotoIds = !isRequest && photoIds.length
+      ? await transferService.filterOwnedPhotoIds(req.admin, photoIds)
+      : [];
+    if (!isRequest && usablePhotoIds.length === 0 && !(req.files || []).length) {
       const rejectedNow = req.rejectedFiles || [];
       for (const file of req.files || []) {
         try { if (fs.existsSync(file.path)) fs.unlinkSync(file.path); } catch (_) { /* noop */ }
@@ -275,7 +281,9 @@ router.post('/',
       return res.status(400).json({
         error: rejectedNow.length
           ? `Nothing to send — no allowed file type among: ${rejectedNow.join(', ')}`
-          : 'Add at least one photo or file to send',
+          : photoIds.length
+            ? 'None of the selected photos could be found'
+            : 'Add at least one photo or file to send',
         code: rejectedNow.length ? 'TYPE_REJECTED' : 'NOTHING_TO_SEND',
         rejected_files: rejectedNow,
       });
@@ -389,6 +397,8 @@ router.patch('/:id',
       maxFilesPerUpload: req.body.maxFilesPerUpload,
     });
     if (!transfer) return res.status(404).json({ error: 'Transfer not found' });
+    // Re-activated or extended: a ready mail held back meanwhile (issue 2061).
+    await transferService.sendHeldReadyEmails(transfer.id);
     return successResponse(res, { transfer }, 200, 'Transfer updated');
   }),
 );
@@ -422,7 +432,11 @@ router.post('/:id/files',
         error: 'A file request does not send files out', code: 'NOT_A_SEND',
       });
     }
-    const transfer = await transferService.addFiles(parseInt(req.params.id, 10), req.body.photoIds, req.admin);
+    let transfer = await transferService.addFiles(parseInt(req.params.id, 10), req.body.photoIds, req.admin);
+    // A ready mail held back while nothing was downloadable (issue 2061).
+    if ((await transferService.sendHeldReadyEmails(transfer.id)).sent) {
+      transfer = await transferService.getTransfer(transfer.id);
+    }
     return successResponse(res, { transfer }, 200, 'Files added');
   }),
 );
@@ -467,6 +481,8 @@ router.post('/:id/upload-files',
       });
     }
     await storeExtraFiles(id, req.files);
+    // A ready mail held back while nothing was downloadable (issue 2061).
+    await transferService.sendHeldReadyEmails(id);
     const transfer = await transferService.getTransfer(id);
     return successResponse(
       res,
@@ -574,7 +590,8 @@ router.post('/:id/resend',
       ? await transferService.sendTransferRequestEmails(id, emails)
       : await transferService.sendTransferEmails(id, emails);
     return successResponse(
-      res, { transfer: await transferService.getTransfer(id), sent: result.sent }, 200, 'Email sent',
+      res, { transfer: await transferService.getTransfer(id), sent: result.sent, held: !!result.held }, 200,
+      result.held ? 'Nothing is ready to download yet; the email goes out once a photo finishes processing' : 'Email sent',
     );
   }),
 );

@@ -108,6 +108,9 @@ function transformQuote(q) {
       // Passive customers (admin-only, no portal access) flagged
       // by null password_hash. Hash itself is dropped here.
       isPassive: q.customer_password_hash == null,
+      // No administrative emails (migration 300): the send action becomes
+      // Issue — the document is issued (in the portal when the customer has access), no mail goes out.
+      noAdminEmails: q.customer_no_admin_emails === true || q.customer_no_admin_emails === 1,
     },
     status: q.status,
     // Migration 140 — cross-document lineage UUID. Lets the frontend
@@ -339,6 +342,9 @@ router.get(
     query('sort').optional({ values: 'falsy' }).isIn(['newest', 'oldest', 'issue_asc', 'issue_desc', 'customer_asc', 'customer_desc', 'value_asc', 'value_desc']),
     query('page').optional({ values: 'falsy' }).isInt({ min: 1 }),
     query('pageSize').optional({ values: 'falsy' }).isInt({ min: 1, max: 100 }),
+    // The project page's add window: whether attaching each quote takes
+    // anything out of another project (projectService.attachMovesFor).
+    query('attachTo').optional({ values: 'falsy' }).isInt({ min: 1 }),
   ],
   handleAsync(async (req, res) => {
     validateRequest(req);
@@ -355,8 +361,10 @@ router.get(
       page: req.query.page ? parseInt(req.query.page, 10) : 1,
       pageSize: req.query.pageSize ? parseInt(req.query.pageSize, 10) : 25,
     });
+    const moves = await require('../services/projectService')
+      .attachMovesFor(req.admin, rows, req.query.attachTo ? parseInt(req.query.attachTo, 10) : null);
     return successResponse(res, {
-      quotes: rows.map(transformQuote),
+      quotes: rows.map((row, i) => (moves ? { ...transformQuote(row), attachMoves: moves[i] } : transformQuote(row))),
       pagination: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 },
     });
   })

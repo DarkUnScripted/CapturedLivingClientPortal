@@ -4,8 +4,11 @@
 
 const { body, validationResult } = require('express-validator');
 const { db, logActivity } = require('../../database/db');
+const { livePhotos } = require('../../utils/photoVisibility');
 const { formatBoolean, whereTimestamp } = require('../../utils/dbCompat');
-const { parseExpiresAtText } = require('../../utils/expiresAtText');
+const { getInstanceTimeZone, endOfDayInZone, addDaysToDate, expiryCalendarDate, parseExpiryInput, extendExpiry } = require('../../utils/galleryExpiry');
+const { toDateOnly } = require('../../utils/dateOnly');
+const { toTimestamp } = require('../../utils/dateNormalize');
 
 const { adminAuth } = require('../../middleware/auth');
 const { requirePermission, userHasAllPermissions, userHasAnyPermission } = require('../../middleware/permissions');
@@ -14,7 +17,7 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const fs = require('fs').promises;
 const path = require('path');
-const { escapeLikePattern, likeWithEscape } = require('../../utils/sqlSecurity');
+const { escapeLikePattern, likeWithEscape, unicodeSearchForms } = require('../../utils/sqlSecurity');
 const { validatePasswordInContext, getBcryptRounds } = require('../../utils/passwordValidation');
 const logger = require('../../utils/logger');
 const { sanitizeForLog, sanitizeValidationErrors } = require('../../utils/sanitizeForLog');
@@ -25,7 +28,8 @@ const { parseBooleanInput } = require('../../utils/parsers');
 const externalAccess = require('../../services/externalMediaAccess');
 const eventTypeService = require('../../services/eventTypeService');
 const { normaliseEventTimeTriple } = require('../../services/eventService');
-const { hasColumnCached } = require('../../utils/schemaCache');
+const { findSlugHolder } = require('../../services/slugRedirects');
+const { hasColumnCached, columnNamesCached } = require('../../utils/schemaCache');
 const { requireEventOwnership, requireEventOwner, scopeEventsListQuery, withoutForeignEventSecrets, scopeEventsQuery, ownsEvent, canLinkCrmToEvent } = require('../../middleware/ownership');
 const eventAdminAssignments = require('../../services/eventAdminAssignmentsService');
 const { mayReviewUploads, holdsForReview } = require('../../services/uploadReviewService');
@@ -44,7 +48,13 @@ const {
 const downloadZipService = require('../../services/downloadZipService');
 const { KEYBIND_MODES } = require('../../services/feedbackDefaults');
 const { GUEST_NAME_MODES } = require('../../services/photoCredit');
-const { validateHeroImageAnchor, getEventFieldRequirements, getCustomerNameFromPayload, getCustomerEmailFromPayload, getCustomerPhoneFromPayload, isPhoneFieldEnabled, mapEventForApi, hasCustomerContactColumns, deleteEventCascade } = require('./helpers');
+const { GUEST_UPLOAD_MIN_EDGE, GUEST_UPLOAD_MAX_EDGE, isGuestUploadMaxEdge } = require('../../services/guestUploadDownscale');
+const { validateHeroImageAnchor, getEventFieldRequirements, getCustomerNameFromPayload, getCustomerEmailFromPayload, getCustomerPhoneFromPayload, isPhoneFieldEnabled, mapEventForApi, hasCustomerContactColumns, deleteEventCascade, claimEventArchive } = require('./helpers');
+// One stored form per name (NFC): a decomposed "Jörg" must match a precomposed search.
+const nfcName = (v) => (typeof v === 'string' ? v.normalize('NFC') : v);
+
+// Largest page the admin events list returns (the pickers ask for 200).
+const EVENT_LIST_MAX_LIMIT = 500;
 
 // Client PIN floor. The PIN guards the client review page and used to accept
 // any string, one character included. Six is the least that the login
@@ -124,7 +134,7 @@ module.exports = (router) => {
       }
       return true;
     }),
-    body('event_name').notEmpty().trim(),
+    body('event_name').customSanitizer(nfcName).notEmpty().trim(),
     body('event_date').optional({ values: 'falsy' }).isDate(),
     // Migration 137 — calendar time fields.
     body('event_time_start').optional({ values: 'falsy' }).matches(/^([01]\d|2[0-3]):[0-5]\d$/)
@@ -196,6 +206,8 @@ module.exports = (router) => {
     body('allow_reactions').optional().isBoolean(),
     body('allow_color_labels').optional().isBoolean(),
     body('allow_decisions').optional().isBoolean(),
+    body('allow_selection_submit').optional().isBoolean(),
+    body('allow_annotations').optional().isBoolean(),
     body('keybind_mode').optional().isIn(KEYBIND_MODES),
     body('css_template_id').optional({ nullable: true, checkFalsy: true }).isInt(),
     // Hero logo settings
@@ -284,7 +296,13 @@ module.exports = (router) => {
   router.get('/', adminAuth, requirePermission('events.view'), async (req, res) => {
     try {
       const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 20;
+      const requestedLimit = parseInt(req.query.limit) || 20;
+      if (page < 1 || requestedLimit < 1) {
+        return res.status(400).json({ error: 'page and limit must be positive integers' });
+      }
+      // The admin pickers ask for at most 200; an unbounded limit returned
+      // every gallery in one response (issue 2078).
+      const limit = Math.min(requestedLimit, EVENT_LIST_MAX_LIMIT);
       const offset = (page - 1) * limit;
       const search = req.query.search || '';
       const status = req.query.status || 'all';
@@ -303,9 +321,13 @@ module.exports = (router) => {
       // Apply search filter
       if (search) {
         const pattern = `%${escapeLikePattern(search)}%`;
+        // Every stored spelling of the name (unicodeSearchForms).
+        const namePatterns = typeof search === 'string'
+          ? unicodeSearchForms(search).map((s) => `%${escapeLikePattern(s)}%`)
+          : [pattern];
         query = query.where((builder) => {
-          builder.whereRaw(likeWithEscape('event_name'), [pattern])
-            .orWhereRaw(likeWithEscape('admin_email'), [pattern])
+          for (const p of namePatterns) builder.orWhereRaw(likeWithEscape('event_name'), [p]);
+          builder.orWhereRaw(likeWithEscape('admin_email'), [pattern])
             .orWhereRaw(likeWithEscape('customer_email'), [pattern])
             .orWhereRaw(likeWithEscape('slug'), [pattern]);
         });
@@ -359,7 +381,7 @@ module.exports = (router) => {
       // of either type (it is what the list sorts on and what the photo cap
       // counts); video_count and video_duration say how much of it is video.
       const eventIds = events.map(e => e.id);
-      const photoCounts = await db('photos')
+      const photoCounts = await livePhotos(db)
         .whereIn('event_id', eventIds)
         .groupBy('event_id')
         .select('event_id')
@@ -430,7 +452,7 @@ module.exports = (router) => {
       }
 
       // Get photo count, and how much of it is video
-      const [{ count: photoCount, video_count: videoCount, video_duration: videoDuration }] = await db('photos')
+      const [{ count: photoCount, video_count: videoCount, video_duration: videoDuration }] = await livePhotos(db)
         .where('event_id', id)
         .count('* as count')
         .select(db.raw(`${VIDEO_COUNT_SQL} as video_count`))
@@ -442,7 +464,7 @@ module.exports = (router) => {
         .sum('size_bytes as totalSize');
 
       // Get recent photos
-      const recentPhotos = await db('photos')
+      const recentPhotos = await livePhotos(db)
         .where('event_id', id)
         .orderBy('uploaded_at', 'desc')
         .limit(10)
@@ -515,6 +537,9 @@ module.exports = (router) => {
         // Whether invoices may be linked to this gallery (the CRM owner rule).
         can_link_crm: canLinkCrmToEvent(req.admin, event),
         can_review_uploads: await mayReviewUploads(req.admin, event),
+        // The zone a date-only expiry ends its day in; the settings date
+        // field reads expires_at back in it.
+        expiry_time_zone: await getInstanceTimeZone(),
         gallery_notice: galleryNotice,
         photo_count: parseInt(photoCount) || 0,
         video_count: Number(videoCount) || 0,
@@ -873,7 +898,7 @@ module.exports = (router) => {
   // client-access secrets, customer assignments, archive/sent state are NOT
   // carried over.
   router.post('/:id/duplicate', adminAuth, requirePermission('events.create'), requireEventOwnership, [
-    body('event_name').trim().notEmpty().withMessage('Event name is required'),
+    body('event_name').customSanitizer(nfcName).trim().notEmpty().withMessage('Event name is required'),
     body('event_date').optional({ values: 'falsy' }).isDate(),
     body('customer_name').optional().trim(),
     body('customer_email').optional({ values: 'falsy' }).isEmail().normalizeEmail(IDENTITY_PRESERVING_NORMALIZE_EMAIL),
@@ -900,7 +925,7 @@ module.exports = (router) => {
       let slug = baseSlug;
       let counter = 1;
       // eslint-disable-next-line no-await-in-loop
-      while (await db('events').where({ slug }).first()) {
+      while (await findSlugHolder(slug)) {
         slug = `${baseSlug}-${counter}`;
         counter += 1;
       }
@@ -908,21 +933,19 @@ module.exports = (router) => {
       // Recompute expires_at: preserve the source's expiration window (delta
       // between source.expires_at and source.event_date) so the duplicate keeps
       // the same "active for N days" feel. Falls back to 30 days if source had
-      // no expiration set.
+      // no expiration set. The window is counted in calendar days, and the
+      // copy expires at the end of its last day in the instance time zone.
       let newExpiresAt = null;
       if (event_date) {
+        const timeZone = await getInstanceTimeZone();
         let expirationDays = 30;
-        if (source.expires_at && source.event_date) {
-          const days = Math.round(
-            (new Date(source.expires_at).getTime() - new Date(source.event_date).getTime())
-          / (24 * 60 * 60 * 1000),
-          );
+        const sourceExpiryDay = source.expires_at ? expiryCalendarDate(source.expires_at, timeZone) : null;
+        const sourceEventDay = toDateOnly(source.event_date);
+        if (sourceExpiryDay && sourceEventDay && /^\d{4}-\d{2}-\d{2}$/.test(sourceEventDay)) {
+          const days = Math.round((Date.parse(sourceExpiryDay) - Date.parse(sourceEventDay)) / (24 * 60 * 60 * 1000));
           if (days > 0) expirationDays = days;
         }
-        const [year, month, day] = event_date.split('-').map((s) => parseInt(s, 10));
-        const baseDate = new Date(year, month - 1, day);
-        baseDate.setDate(baseDate.getDate() + expirationDays);
-        newExpiresAt = baseDate;
+        newExpiresAt = endOfDayInZone(addDaysToDate(event_date, expirationDays), timeZone);
       }
 
       const shareToken = crypto.randomBytes(16).toString('hex');
@@ -941,6 +964,17 @@ module.exports = (router) => {
 
       const customerColumnsAvailable = await hasCustomerContactColumns();
       const calendarColumnsExist = await hasColumnCached('events', 'is_full_day');
+      // The Live Slideshow style is gallery configuration too (issue 2189).
+      // Its columns come from four migrations (138/139/158/163), so copy the
+      // ones this schema has. The share token stays behind: a copy gets its
+      // own link. show_category_id is mapped after the categories are cloned,
+      // with upload_category_id.
+      const eventColumns = await columnNamesCached('events');
+      const slideshowStyle = Object.fromEntries(
+        ['show_interval_ms', 'show_transition', 'show_transition_ms', 'show_watermark', 'show_qr', 'show_colorfilter', 'show_order']
+          .filter((column) => eventColumns.has(column))
+          .map((column) => [column, source[column]])
+      );
 
       // Build the insert row. Copy behaviour + branding fields from source;
       // leave per-gallery secrets / state / photos blank.
@@ -972,14 +1006,20 @@ module.exports = (router) => {
         updated_at: new Date().toISOString(),
         created_by: req.admin.id,
         allow_user_uploads: source.allow_user_uploads,
-        upload_category_id: source.upload_category_id,
+        moderate_guest_uploads: formatBoolean(parseBooleanInput(source.moderate_guest_uploads, false)),
+        guest_upload_max_edge: source.guest_upload_max_edge || null,
         // Uploader names are part of the gallery's configuration (#1561).
         guest_name_mode: source.guest_name_mode || 'off',
         show_credits_to_guests: formatBoolean(parseBooleanInput(source.show_credits_to_guests, false)),
+        show_exif_to_guests: formatBoolean(parseBooleanInput(source.show_exif_to_guests, false)),
+        // How guests see photo names is display configuration (issue 1733, E6).
+        neutral_photo_labels: formatBoolean(parseBooleanInput(source.neutral_photo_labels, false)),
         // Folder structure is configuration (issue 1786); the delivery state
         // of the source (issue 1562) is not — a copy starts complete.
         folder_structure: formatBoolean(parseBooleanInput(source.folder_structure, false)),
         delivery_badge_label: source.delivery_badge_label || null,
+        // Live refresh is guest-facing behaviour of the gallery (issue 1733).
+        live_refresh: formatBoolean(parseBooleanInput(source.live_refresh, false)),
         allow_downloads: source.allow_downloads,
         disable_right_click: source.disable_right_click,
         enable_devtools_protection: source.enable_devtools_protection,
@@ -1027,6 +1067,7 @@ module.exports = (router) => {
         // carry over — admin re-decides per gallery.
         client_access_enabled: formatBoolean(false),
         og_image_share_enabled: formatBoolean(false),
+        ...slideshowStyle,
       }).returning('id');
 
       const newEventId = insertResult[0]?.id || insertResult[0];
@@ -1047,6 +1088,8 @@ module.exports = (router) => {
           // row rather than the global defaults (#1044).
           allow_color_labels: sourceFeedback.allow_color_labels,
           allow_decisions: sourceFeedback.allow_decisions,
+          allow_selection_submit: sourceFeedback.allow_selection_submit,
+          allow_annotations: sourceFeedback.allow_annotations,
           keybind_mode: sourceFeedback.keybind_mode,
           require_name_email: sourceFeedback.require_name_email,
           moderate_comments: sourceFeedback.moderate_comments,
@@ -1063,6 +1106,7 @@ module.exports = (router) => {
       // Copy per-event photo categories (global categories are not duplicated —
       // they apply to every event already). Mapping by name; photo_categories
       // has no foreign key into photos here so we just clone the rows.
+      const newIdByOld = new Map();
       if (await db.schema.hasTable('photo_categories')) {
         const sourceCategories = await db('photo_categories')
           .where({ event_id: id })
@@ -1070,7 +1114,6 @@ module.exports = (router) => {
           .select('id', 'name', 'slug', 'is_global', 'is_folder', 'parent_id', 'source_path');
         // Parents before children so each clone can point at its parent's
         // clone (issue 1786: nested folders keep their tree).
-        const newIdByOld = new Map();
         const pending = [...sourceCategories];
         while (pending.length > 0) {
           const index = pending.findIndex((c) => !c.parent_id || newIdByOld.has(Number(c.parent_id))
@@ -1090,6 +1133,27 @@ module.exports = (router) => {
           }).returning('id');
           newIdByOld.set(Number(c.id), Number(inserted[0]?.id ?? inserted[0]));
         }
+      }
+
+      // The guest-upload default and the slideshow category filter (issue
+      // 2189) follow the clone of their category; a global category applies
+      // to the copy as it is. Anything else would point the copy at the
+      // source gallery's category, so it is left empty.
+      const copiedCategoryId = async (sourceCategoryId) => {
+        if (!sourceCategoryId) return null;
+        const sourceId = Number(sourceCategoryId);
+        if (newIdByOld.has(sourceId)) return newIdByOld.get(sourceId);
+        const globalCategory = await db('photo_categories')
+          .where({ id: sourceId, is_global: formatBoolean(true) })
+          .first('id');
+        return globalCategory ? sourceId : null;
+      };
+      const categoryFields = { upload_category_id: await copiedCategoryId(source.upload_category_id) };
+      if (eventColumns.has('show_category_id')) {
+        categoryFields.show_category_id = await copiedCategoryId(source.show_category_id);
+      }
+      if (Object.values(categoryFields).some((value) => value !== null)) {
+        await db('events').where({ id: newEventId }).update(categoryFields);
       }
 
       await logActivity('event_duplicated',
@@ -1115,7 +1179,7 @@ module.exports = (router) => {
 
   // Update event
   router.put('/:id', adminAuth, requirePermission('events.edit'), requireEventOwnership, [
-    body('event_name').optional().trim().notEmpty(),
+    body('event_name').optional().customSanitizer(nfcName).trim().notEmpty(),
     body('event_date').optional({ values: 'falsy' }).isDate(),
     // Migration 137 — calendar time fields. Same regex/range rule as POST.
     body('event_time_start').optional({ values: 'falsy', nullable: true })
@@ -1133,14 +1197,29 @@ module.exports = (router) => {
     // cannot read either, so such a value was accepted and then silently
     // dropped out of every expiry comparison.
     body('expires_at').optional({ nullable: true, checkFalsy: true }).isISO8601()
-      .custom((value) => parseExpiresAtText(value) !== null)
+      // A bare date is the end of that day; any real date passes (the zone
+      // only moves the instant).
+      .custom((value) => parseExpiryInput(value, 'UTC') !== null)
       .withMessage('expires_at must be an ISO 8601 date-time such as 2026-10-06T12:00:00Z'),
     body('welcome_message').optional({ nullable: true, checkFalsy: true }).trim(),
     body('color_theme').optional({ nullable: true }),
     body('allow_user_uploads').optional().isBoolean(),
+    // Hold guest uploads until they are approved (issue 1733).
+    body('moderate_guest_uploads').optional().isBoolean(),
+    // Longest edge guest photos are scaled to in the browser (issue 1733).
+    // null uploads originals.
+    body('guest_upload_max_edge').optional({ nullable: true }).custom(isGuestUploadMaxEdge)
+      .withMessage(`guest_upload_max_edge must be a whole number from ${GUEST_UPLOAD_MIN_EDGE} to ${GUEST_UPLOAD_MAX_EDGE}, or null`)
+      .toInt(),
     // Uploader names (#1561).
     body('guest_name_mode').optional().isIn(GUEST_NAME_MODES),
     body('show_credits_to_guests').optional().isBoolean(),
+    // Live refresh of an open gallery (issue 1733, C5).
+    body('live_refresh').optional().isBoolean(),
+    // Camera details in the guest lightbox (issue 1733, D1).
+    body('show_exif_to_guests').optional().isBoolean(),
+    // "Photo 12 of 84" instead of filenames for guests (issue 1733, E6).
+    body('neutral_photo_labels').optional().isBoolean(),
     // Reveal mode (#838): hide the gallery from guests until reveal.
     body('reveal_mode').optional().isBoolean(),
     body('reveal_at').optional({ nullable: true, checkFalsy: true }).isISO8601(),
@@ -1148,7 +1227,7 @@ module.exports = (router) => {
     body('folder_structure').optional().isBoolean(),
     body('delivery_status').optional().isIn(['complete', 'partial']),
     body('delivery_expected_count').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1, max: 100000 }),
-    body('delivery_due_at').optional({ nullable: true, checkFalsy: true }).isISO8601(),
+    body('delivery_due_at').optional({ nullable: true, checkFalsy: true }).isISO8601({ strict: true }),
     body('delivery_badge_label').optional({ nullable: true }).isString().isLength({ max: 60 }),
     // Migration 143 — per-event reminder overrides. All three are
     // optional; nullable values are accepted so admins can clear an
@@ -1331,6 +1410,46 @@ module.exports = (router) => {
           || parseBooleanInput(req.body.regenerate_client_token, false) || togglesProtection;
         if (changesCredentials && !ownsEvent(req.admin, stored)) {
           return res.status(403).json({ error: 'Only the gallery owner can change its password', code: 'EVENT_OWNER_REQUIRED' });
+        }
+      }
+
+      // Who the gallery's emails go to is the owner's as well: the gallery
+      // email carries the share link, so a team member who could retarget the
+      // customer or admin address, or the assigned customer accounts, could
+      // send the gallery anywhere. A non-owner's echo of the stored values
+      // (the settings form sends what it loaded) changes nothing and passes.
+      const recipientKeys = ['customer_email', 'admin_email']
+        .filter((key) => Object.prototype.hasOwnProperty.call(req.body, key));
+      const touchesAccounts = Array.isArray(req.body.customer_account_ids);
+      if (recipientKeys.length > 0 || touchesAccounts) {
+        const stored = await db('events').where('id', id).first('id', 'created_by', 'customer_email', 'host_email', 'admin_email');
+        if (!stored) return res.status(404).json({ error: 'Event not found' });
+        if (!ownsEvent(req.admin, stored)) {
+          const address = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+          const storedAddress = {
+            customer_email: stored.customer_email ?? stored.host_email,
+            admin_email: stored.admin_email,
+          };
+          let changesRecipients = recipientKeys.some((key) => address(req.body[key]) !== address(storedAddress[key]));
+          if (!changesRecipients && touchesAccounts) {
+            const current = (await require('../../services/customerAccountsService').getAssignmentsForEvent(parseInt(id, 10)))
+              .map((c) => Number(c.id));
+            const submitted = [...new Set(req.body.customer_account_ids.map(Number))];
+            changesRecipients = submitted.length !== current.length || submitted.some((v) => !current.includes(v));
+          }
+          if (changesRecipients) {
+            return res.status(403).json({ error: 'Only the gallery owner can change who receives its emails', code: 'EVENT_OWNER_REQUIRED' });
+          }
+          // A real no-op, as for the account echo above: written back, the
+          // echo would undo a change the owner made since the page loaded.
+          for (const key of recipientKeys) {
+            delete updates[key];
+            delete req.body[key];
+          }
+          if (touchesAccounts) {
+            delete updates.customer_account_ids;
+            delete req.body.customer_account_ids;
+          }
         }
       }
 
@@ -1710,7 +1829,7 @@ module.exports = (router) => {
       // chosen once the owner has approved the photo.
       if (updates.hero_photo_id != null
         && Number(updates.hero_photo_id) !== Number(event.hero_photo_id)) {
-        const underReview = await db('photos')
+        const underReview = await livePhotos(db)
           .where({ id: updates.hero_photo_id, event_id: event.id })
           .whereNotNull('moderation_status')
           .first('id');
@@ -1782,8 +1901,10 @@ module.exports = (router) => {
         // shapes SQLite's date parser cannot read (`+0200` offsets, the basic
         // format without separators), and whereTimestamp drops such a row
         // from every expiry comparison rather than guess. A zone-less value
-        // is read as UTC, as julianday() reads the stored ones.
-        updates.expires_at = parseExpiresAtText(updates.expires_at).toISOString();
+        // is read as UTC, as julianday() reads the stored ones. A bare date
+        // (the settings date field) is the end of that day in the instance
+        // time zone.
+        updates.expires_at = parseExpiryInput(updates.expires_at, await getInstanceTimeZone()).toISOString();
       }
 
       // Format hero logo settings if provided. null = inherit the global
@@ -1877,9 +1998,24 @@ module.exports = (router) => {
         updates.custom_theme_enabled = formatBoolean(parseBooleanInput(updates.custom_theme_enabled, false));
       }
 
+      // Guest uploads with approval (issue 1733). Switching it off leaves the
+      // photos already waiting where they are: they still need a decision.
+      if (Object.prototype.hasOwnProperty.call(updates, 'moderate_guest_uploads')) {
+        updates.moderate_guest_uploads = formatBoolean(parseBooleanInput(updates.moderate_guest_uploads, false));
+      }
+
       // Written through formatBoolean like the other event flags (#1561).
       if (Object.prototype.hasOwnProperty.call(updates, 'show_credits_to_guests')) {
         updates.show_credits_to_guests = formatBoolean(parseBooleanInput(updates.show_credits_to_guests, false));
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, 'live_refresh')) {
+        updates.live_refresh = formatBoolean(parseBooleanInput(updates.live_refresh, false));
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, 'show_exif_to_guests')) {
+        updates.show_exif_to_guests = formatBoolean(parseBooleanInput(updates.show_exif_to_guests, false));
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, 'neutral_photo_labels')) {
+        updates.neutral_photo_labels = formatBoolean(parseBooleanInput(updates.neutral_photo_labels, false));
       }
 
       // Reveal mode (#838). Turning the toggle ON from off clears
@@ -1932,7 +2068,7 @@ module.exports = (router) => {
         }
       }
       if (Object.prototype.hasOwnProperty.call(updates, 'delivery_due_at')) {
-        updates.delivery_due_at = updates.delivery_due_at ? new Date(updates.delivery_due_at).toISOString() : null;
+        updates.delivery_due_at = require('../../services/deliveryService').parseDueAtInput(updates.delivery_due_at);
         if (!Object.prototype.hasOwnProperty.call(updates, 'delivery_due_source')) updates.delivery_due_source = 'manual';
         // A new promise gets its own reminders.
         updates.delivery_reminder_sent_at = null;
@@ -1964,30 +2100,51 @@ module.exports = (router) => {
         updates.client_share_token = crypto.randomBytes(32).toString('hex');
       }
 
+      // A key that is not a column of events would reach the UPDATE and come
+      // back as a 500 (issue 2078). Every legitimate input-only key has been
+      // taken out of `updates` above, so what is left and unknown is ignored,
+      // as the denylist above does with the keys it drops.
+      // One cached column set, not a schema query per request key.
+      const eventColumns = await columnNamesCached('events');
+      for (const key of Object.keys(updates)) {
+        if (!eventColumns.has(key)) delete updates[key];
+      }
+
       // Update event. Skip the write when the denylist (or masked secrets)
       // left nothing to change — Knex rejects .update({}) with an error,
       // which would surface as a 500 for an otherwise-valid no-op request
       // (e.g. a body of only protected fields). (codex review.)
       if (Object.keys(recoverable).length > 0) Object.assign(updates, await galleryPasswordColumns(recoverable));
       if (credentialChanges.size > 0) Object.assign(updates, await credentialChangeColumns(...credentialChanges));
-      if (Object.keys(updates).length > 0) {
-        let eventUpdate = db('events').where('id', id);
-        if (keptGalleryHash) eventUpdate = eventUpdate.where('password_hash', event.password_hash);
-        if (keptClientHash) eventUpdate = eventUpdate.where('client_password_hash', event.client_password_hash);
-        const updated = await eventUpdate.update(updates);
-        if (!updated && (keptGalleryHash || keptClientHash)) {
-          // A password changed underneath: write the submitted ones as changes.
-          if (keptGalleryHash) {
-            updates.password_hash = await bcrypt.hash(newPasswordPlain, getBcryptRounds());
-            credentialChanges.add('gallery');
+      // A new expiry holds the archive claim (issue 2012): an archive already
+      // running would publish and delete the originals of the gallery the
+      // admin just extended. 409 while one runs; nothing is written then.
+      const expiryChanged = Object.prototype.hasOwnProperty.call(updates, 'expires_at')
+        && toTimestamp(updates.expires_at) !== toTimestamp(event.expires_at)
+        && !(updates.expires_at == null && event.expires_at == null);
+      const archiveLease = expiryChanged ? await claimEventArchive(event.id) : null;
+      try {
+        if (Object.keys(updates).length > 0) {
+          let eventUpdate = db('events').where('id', id);
+          if (keptGalleryHash) eventUpdate = eventUpdate.where('password_hash', event.password_hash);
+          if (keptClientHash) eventUpdate = eventUpdate.where('client_password_hash', event.client_password_hash);
+          const updated = await eventUpdate.update(updates);
+          if (!updated && (keptGalleryHash || keptClientHash)) {
+            // A password changed underneath: write the submitted ones as changes.
+            if (keptGalleryHash) {
+              updates.password_hash = await bcrypt.hash(newPasswordPlain, getBcryptRounds());
+              credentialChanges.add('gallery');
+            }
+            if (keptClientHash) {
+              updates.client_password_hash = await bcrypt.hash(recoverable.clientPassword, getBcryptRounds());
+              credentialChanges.add('client');
+            }
+            Object.assign(updates, await credentialChangeColumns(...credentialChanges));
+            await db('events').where('id', id).update(updates);
           }
-          if (keptClientHash) {
-            updates.client_password_hash = await bcrypt.hash(recoverable.clientPassword, getBcryptRounds());
-            credentialChanges.add('client');
-          }
-          Object.assign(updates, await credentialChangeColumns(...credentialChanges));
-          await db('events').where('id', id).update(updates);
         }
+      } finally {
+        if (archiveLease) await archiveLease.release();
       }
       if (Object.keys(recoverable).length > 0) await dropCopiesIfStorageOff(id);
 
@@ -2048,6 +2205,12 @@ module.exports = (router) => {
       const changeKeys = Object.keys(req.body);
       if (changeKeys.includes('watermark_downloads') || changeKeys.includes('watermark_text')) {
         downloadZipService.invalidate(parseInt(id));
+      }
+      // The gallery's stored watermarks (the gallery view) draw its text too.
+      if (changeKeys.includes('watermark_text')
+          && String(updates.watermark_text ?? '').trim() !== String(event.watermark_text ?? '').trim()) {
+        require('../../services/watermarkGeneratorService').regenerateForEvent(parseInt(id))
+          .catch((err) => logger.error('Gallery watermark regeneration failed', { eventId: id, error: err.message }));
       }
 
       if (teamError) {
@@ -2125,6 +2288,9 @@ module.exports = (router) => {
       if (error.code === 'EVENT_NOT_FOUND') {
         return res.status(404).json({ error: 'Event not found' });
       }
+      if (error.code === 'ARCHIVE_IN_PROGRESS') {
+        return res.status(409).json({ error: error.message, code: error.code });
+      }
       logger.error('Error deleting event', { eventId: req.params.id, error: error.message });
       if (error.message && error.message.includes('foreign key constraint')) {
         return res.status(500).json({
@@ -2148,12 +2314,21 @@ module.exports = (router) => {
       }
 
       const newStatus = !parseBooleanInput(event.is_active, false);
-      await db('events')
-        .where('id', id)
-        .update({
-          is_active: formatBoolean(newStatus),
-          updated_at: new Date().toISOString()
-        });
+      // Reactivating holds the archive claim (issue 2012), as extending does.
+      const archiveLease = newStatus ? await claimEventArchive(event.id) : null;
+      try {
+        await db('events')
+          .where('id', id)
+          .update({
+            is_active: formatBoolean(newStatus),
+            updated_at: new Date().toISOString()
+          });
+        // The gallery is the admin's to switch off again now: the expiry
+        // checker no longer retries an archive it failed on it.
+        if (archiveLease) await require('../../services/archiveService').writeExpiryAttempt(archiveLease, null);
+      } finally {
+        if (archiveLease) await archiveLease.release();
+      }
 
       // Log activity
       await logActivity(newStatus ? 'event_activated' : 'event_deactivated',
@@ -2167,6 +2342,7 @@ module.exports = (router) => {
         is_active: newStatus
       });
     } catch (error) {
+      if (error.code === 'ARCHIVE_IN_PROGRESS') return res.status(409).json({ error: error.message, code: error.code });
       errorResponse(res, error, 500, 'Failed to toggle event status');
     }
   });
@@ -2194,13 +2370,29 @@ module.exports = (router) => {
         return res.status(404).json({ error: 'Event not found' });
       }
 
-      const newExpiration = new Date(event.expires_at);
-      newExpiration.setDate(newExpiration.getDate() + days);
+      // Held through the write (issue 2012): an archive running under it
+      // would publish and delete the originals of the gallery just extended.
+      // The expiry is read again under the claim.
+      const archiveLease = await claimEventArchive(event.id);
+      let newExpiration;
+      try {
+        const current = await db('events').where('id', event.id).first();
+        if (!current) return res.status(404).json({ error: 'Event not found' });
+        // Same wall-clock time `days` calendar days later in the instance time
+        // zone, so an end-of-day expiry stays end-of-day across a DST change.
+        const currentExpiry = toTimestamp(current.expires_at);
+        if (!Number.isFinite(currentExpiry)) {
+          return res.status(400).json({ error: 'This gallery has no expiry date to extend' });
+        }
+        newExpiration = extendExpiry(new Date(currentExpiry), days, await getInstanceTimeZone());
 
-      await db('events').where('id', id).update({
-        expires_at: newExpiration,
-        is_active: formatBoolean(true) // reactivate if it had expired
-      });
+        await db('events').where('id', event.id).update({
+          expires_at: newExpiration.toISOString(),
+          is_active: formatBoolean(true) // reactivate if it had expired
+        });
+      } finally {
+        await archiveLease.release();
+      }
 
       await logActivity('event_expiration_extended',
         { eventName: event.event_name, days },
@@ -2210,6 +2402,7 @@ module.exports = (router) => {
 
       res.json({ expires_at: newExpiration });
     } catch (error) {
+      if (error.code === 'ARCHIVE_IN_PROGRESS') return res.status(409).json({ error: error.message, code: error.code });
       errorResponse(res, error, 500, 'Failed to extend expiration');
     }
   });

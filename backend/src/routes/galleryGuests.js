@@ -7,6 +7,7 @@ const { rateLimitKey } = require('../utils/rateLimitKey');
 const { verifyGalleryAccess, denySlideshowToken } = require('../middleware/gallery');
 const { resolveGuest, requireGuest, signGuestToken } = require('../middleware/guestAuth');
 const feedbackService = require('../services/feedbackService');
+const selectionSubmissions = require('../services/selectionSubmissions');
 const guestRecovery = require('../services/guestRecoveryService');
 const { sanitizeName } = require('../utils/personName');
 const { parseBooleanInput } = require('../utils/parsers');
@@ -209,9 +210,15 @@ router.delete('/:slug/guest/me', verifyGalleryAccess, resolveGuest, requireGuest
         email: null,
         last_seen_at: db.fn.now(),
       });
+    // Their "mail me when the download is ready" requests (issue 1733).
+    await require('../services/downloadJobNotifier')
+      .forgetGuest({ id: req.guest.id, event_id: req.event.id, email: req.guest.email });
     // Their name on the photos they uploaded goes with them (#1561). After
     // the soft delete, so an upload still in flight sees it.
     await clearGuestCredits(req.guest.id);
+    // Again after the soft delete, for the same reason: a hand-over that got
+    // in before it was stored with the guest's name (issue 1733).
+    await selectionSubmissions.anonymizeGuest(req.guest.id);
 
     logger.info('Guest self-forgot', {
       eventId: req.event.id,
@@ -430,6 +437,17 @@ router.post('/:slug/guest/redeem', verifyGalleryAccess, async (req, res) => {
       };
       const body = { error: result.error };
       if (result.guestId != null) body.guest_id = Number(result.guestId);
+      // A spent invite is how a guest whose device lost its identity comes
+      // back, and the email code is their only way in from there. Say whether
+      // that way exists, so the client offers it only when a code can arrive
+      // (issue 2209). A yes/no, never the address: whoever holds the link
+      // learns nothing about the guest they could not already act on.
+      if (result.error === 'already_redeemed' && result.guestId != null) {
+        const invited = await db('gallery_guests')
+          .where({ id: result.guestId, event_id: event.id, is_deleted: false })
+          .first('email');
+        body.recoverable = Boolean(invited?.email);
+      }
       return res.status(statusMap[result.error] || 400).json(body);
     }
 

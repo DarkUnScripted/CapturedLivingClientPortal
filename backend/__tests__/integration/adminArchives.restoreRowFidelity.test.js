@@ -521,8 +521,8 @@ describe('archive restore rebuilds the photo row faithfully', () => {
     }
 
     await archiveEvent(await db('events').where('id', eventId).first());
-    // The originals are gone (the directory itself is left behind).
-    expect(await fs.promises.readdir(dir)).toEqual([]);
+    // The originals are gone, and the folders they were in with them.
+    await expect(fs.promises.readdir(dir)).rejects.toMatchObject({ code: 'ENOENT' });
 
     await restore(eventId);
 
@@ -596,7 +596,9 @@ describe('archive restore rebuilds the photo row faithfully', () => {
     try {
       await restore(eventId);
       expect(await db('photos').where('id', copied).first()).toMatchObject({ web_status: 'pending' });
-      expect(await db('photos').where('id', playable).first()).toMatchObject({ web_status: 'skipped' });
+      // Metadata stripping is on by default (issue 2102): the playable video
+      // is queued for its metadata-free remux too.
+      expect(await db('photos').where('id', playable).first()).toMatchObject({ web_status: 'pending' });
     } finally {
       await db('app_settings').where({ setting_key: 'general_video_web_rendition' }).del();
       videoRendition.clearCache();
@@ -627,6 +629,27 @@ describe('archive restore rebuilds the photo row faithfully', () => {
     // An uploader deleted since is not written back (a foreign key on PostgreSQL).
     expect(rows['rejected.jpg']).toMatchObject({ moderation_status: 'rejected', visibility: 'hidden', uploaded_by_admin_id: null });
     expect(rows['approved.jpg']).toMatchObject({ moderation_status: null, visibility: 'visible' });
+  });
+
+  it('writes source_filename back so a restored camera-named photo keeps its own derivatives', async () => {
+    // fileWatcher never sets original_filename, so its manifest entry carries
+    // null there. imageProcessor tells a camera-named photo by filename ===
+    // source_filename; a restored row without source_filename regenerated to
+    // the bare camera name, shared with every other gallery's IMG_0001.JPG.
+    const archiveRelPath = await writeArchive('sourcename.zip', {
+      'individual/IMG_0001.JPG': BYTES,
+      'individual/upload_abc123.jpg': BYTES,
+      'photos_manifest.json': manifestOf([
+        { filename: 'IMG_0001.JPG', original_filename: null, type: 'individual' },
+        { filename: 'upload_abc123.jpg', original_filename: 'DSC_0009.jpg', type: 'individual' },
+      ]),
+    });
+    const eventId = await seedArchivedEvent(archiveRelPath, 'source-name-event');
+
+    await restore(eventId);
+
+    expect(await columnByFilename(eventId, 'source_filename'))
+      .toEqual({ 'IMG_0001.JPG': 'IMG_0001.JPG', 'upload_abc123.jpg': 'DSC_0009.jpg' });
   });
 
   it('keeps the original upload time rather than stamping the restore time', async () => {

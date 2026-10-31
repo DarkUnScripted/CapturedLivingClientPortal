@@ -6,8 +6,8 @@
  */
 
 /* ---- Below the hero: deliverables (folders) and room filters -------------
-   captured-living/BelowHero.tsx moves PicPeak's folder navigation and filter
-   bar under the hero photo. */
+   captured-living/BelowHero.tsx moves PicPeak's folder navigation, category
+   chips and gallery toolbar under the hero photo. */
 
 /* The photo wrapper keeps the extra top margin PicPeak gives it when the
    filter bar sat above the hero; without the bar there, close the gap. */
@@ -41,11 +41,7 @@
   border-color: var(--cl-charcoal);
 }
 
-/* Room filters: the category chips, without filename search and sort. */
-.gallery-page .photo-filter-search-row {
-  display: none;
-}
-
+/* Room filters: PicPeak's category chips (GalleryCategoryChips). */
 .gallery-page .photo-filter-categories .btn-primary,
 .gallery-page .photo-filter-categories .btn-outline {
   min-height: 40px;

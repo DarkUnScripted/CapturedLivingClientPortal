@@ -127,7 +127,7 @@ services:
       # Trust exactly the immediately connected frontend nginx hop. The
       # backend port is host-loopback-only, preventing remote bypasses.
       # A reverse proxy on the host in front of the frontend makes it 2.
-      - TRUST_PROXY=${TRUST_PROXY:-}
+      - TRUST_PROXY=${TRUST_PROXY:-1}
       - COOKIE_SECURE=${COOKIE_SECURE:-auto}
       - ENABLE_HSTS=${ENABLE_HSTS:-false}
       - DB_HOST=${DB_HOST:-postgres}
@@ -248,6 +248,9 @@ services:
       # anonymously — it must match the backend's FACE_ML_TOKEN.
       - FACE_ML_TOKEN=${FACE_ML_TOKEN:-}
       - FACE_ORT_THREADS=${FACE_ORT_THREADS:-1}
+      # Scene tagging (issue 1733); only read once /tags is used.
+      - TAG_SCORE_THRESHOLD=${TAG_SCORE_THRESHOLD:-0.01}
+      - TAG_TOP_K=${TAG_TOP_K:-5}
       - TZ=${TZ:-UTC}
     # No volumes and no published ports: stateless, and reachable only from
     # the backend on picpeak-network.

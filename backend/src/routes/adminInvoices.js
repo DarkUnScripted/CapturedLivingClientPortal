@@ -36,9 +36,9 @@ const { getStoragePath } = require('../config/storage');
 const invoiceService = require('../services/invoiceService');
 const accountingHistory = require('../services/accountingHistory');
 const expenseService = require('../services/expenseService');
-const { requireFeatureFlag } = require('../middleware/requireFeatureFlag');
+const { requireFeatureFlag, isFeatureEnabled } = require('../middleware/requireFeatureFlag');
 const { db } = require('../database/db');
-const { canLinkCrmToEvent } = require('../middleware/ownership');
+const { canLinkCrmToEvent, ownsProject } = require('../middleware/ownership');
 const { ensureEventMatchesCustomer } = require('../services/invoice/helpers');
 const { hasColumnCached } = require('../utils/schemaCache');
 
@@ -119,6 +119,9 @@ function transformInvoice(i) {
       // identified by a null password_hash. We expose just the
       // boolean — the hash itself is dropped here.
       isPassive: i.customer_password_hash == null,
+      // No administrative emails (migration 300): the send action becomes
+      // Issue — the document is issued (in the portal when the customer has access), no mail goes out.
+      noAdminEmails: i.customer_no_admin_emails === true || i.customer_no_admin_emails === 1,
     },
     // Migration 140 — cross-document lineage UUID. See adminQuotes
     // transform for the rationale; lets the lineage card pull the
@@ -134,6 +137,8 @@ function transformInvoice(i) {
     sourceContractId: i.source_contract_id || null,
     sourceContractNumber: i.source_contract_number || null,
     eventId: i.event_id,
+    // Migration 315: the project it was created in or attached to.
+    projectId: i.project_id ?? null,
     language: i.language,
     currency: i.currency,
     issueDate: i.issue_date,
@@ -285,6 +290,9 @@ const INVOICE_BODY_VALIDATORS = [
   // eventId links the invoice to a gallery event (FK) when created from
   // the event detail page; persisted by createInvoice (event_id).
   body('eventId').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  // projectId links the invoice to a project when created from the project
+  // page (migration 315). Vetted in POST / (ownership, customer, flag).
+  body('projectId').optional({ values: 'falsy' }).isInt({ min: 1 }),
   body('eventName').optional({ values: 'falsy' }).isString().isLength({ max: 255 }),
   body('eventDate').optional({ values: 'falsy' }).isISO8601(),
   body('eventTimeStart').optional({ values: 'falsy' }).isString().isLength({ max: 8 }),
@@ -319,6 +327,7 @@ function mapPayloadToService(body) {
     customerAccountId: 'customerAccountId',
     sourceQuoteId: 'sourceQuoteId',
     eventId: 'eventId',
+    projectId: 'projectId',
     language: 'language', currency: 'currency',
     issueDate: 'issueDate', dueDate: 'dueDate',
     scheduledSendAt: 'scheduledSendAt',
@@ -380,6 +389,11 @@ router.get(
     query('sort').optional({ values: 'falsy' }).isIn(['newest', 'oldest', 'issue_asc', 'issue_desc', 'due_asc', 'due_desc', 'value_asc', 'value_desc', 'customer_asc', 'customer_desc']),
     query('page').optional({ values: 'falsy' }).isInt({ min: 1 }),
     query('pageSize').optional({ values: 'falsy' }).isInt({ min: 1, max: 100 }),
+    // The project page's add window: whether each invoice may join this
+    // project (projectService.invoiceAttachRefusal, the attach's own rule).
+    // Answered only for a project the caller may work on: the rule reads
+    // other projects unscoped.
+    query('attachTo').optional({ values: 'falsy' }).isInt({ min: 1 }),
   ],
   handleAsync(async (req, res) => {
     validateRequest(req);
@@ -401,8 +415,16 @@ router.get(
       page: req.query.page ? parseInt(req.query.page, 10) : 1,
       pageSize: req.query.pageSize ? parseInt(req.query.pageSize, 10) : 25,
     });
+    let invoices = rows.map(transformInvoice);
+    const attachTo = req.query.attachTo ? parseInt(req.query.attachTo, 10) : null;
+    if (attachTo && await isFeatureEnabled('projects') && await ownsProject(req.admin, attachTo)) {
+      const { invoiceAttachRefusal } = require('../services/projectService');
+      const refusals = [];
+      for (const row of rows) refusals.push(await invoiceAttachRefusal(row, attachTo));
+      invoices = invoices.map((inv, i) => ({ ...inv, attachRefusal: refusals[i]?.code || null }));
+    }
     return successResponse(res, {
-      invoices: rows.map(transformInvoice),
+      invoices,
       pagination: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 },
     });
   })
@@ -448,6 +470,70 @@ router.get(
 
 // ---- create + update -------------------------------------------------
 
+// Why a new invoice may not join project `projectId`, or null when it may:
+// - the feature is on;
+// - the project is the caller's: created by them, or any for a super admin.
+//   The rule the CRM access layer applies to project_id on an invoice insert
+//   (crmAccess validateWrite), so it is refused here with a clear answer
+//   rather than failing inside createInvoice. 404, so no existence oracle;
+// - the customer is billed per event: a monthly or manual customer's lines go
+//   into one shared draft (createInvoice → appendToMonthlyDraft), which no
+//   single project can hold, so the link would silently drop;
+// - it is not another customer's (projects hold one customer), adopting the
+//   customer when the project has none yet.
+async function projectLinkRefusal(req, projectId) {
+  if (!(await isFeatureEnabled('projects'))) {
+    return { status: 403, body: { error: 'Projects feature is disabled', code: 'PROJECTS_DISABLED' } };
+  }
+  const projectService = require('../services/projectService');
+  const owned = await projectService.carriedProjectId(projectId, req.admin.id);
+  const project = owned ? await db('projects').where({ id: owned }).first('id', 'customer_account_id') : null;
+  // Not found, or not one the caller created: the same answer either way.
+  if (!project) return { status: 404, body: { error: 'Project not found, or not one you created' } };
+  const customer = await db('customer_accounts').where({ id: req.body.customerAccountId }).first('billing_cadence');
+  if (customer && (customer.billing_cadence === 'monthly' || customer.billing_cadence === 'manual')) {
+    return {
+      status: 422,
+      body: {
+        error: 'This customer is billed monthly or by hand, so the invoice goes into their collected draft and cannot belong to one project. Create it without the project.',
+        code: 'PROJECT_INVOICE_COLLECTED_BILLING',
+      },
+    };
+  }
+  // Last, because it writes: a project with no customer adopts this one, unless
+  // something it holds is another customer's (holdProjectToCustomer is atomic,
+  // so two invoices racing on an empty project cannot both win). Done before
+  // the invoice exists, so a refused link never leaves an invoice behind.
+  // The gallery the invoice is for has to be in the same project, or the
+  // invoice would count in the gallery's project and not in this one.
+  const eventId = parseInt(req.body.eventId, 10);
+  if (eventId) {
+    const event = await db('events').where({ id: eventId }).first('project_id');
+    if (event?.project_id != null && Number(event.project_id) !== Number(project.id)) {
+      return { status: 422, body: { error: 'That gallery belongs to another project', code: 'PROJECT_EVENT_MISMATCH' } };
+    }
+  }
+  // Likewise the quote it is made from (the only source this route takes:
+  // mapPayloadToService passes sourceQuoteId on), and anything else of that
+  // quote's deal: the deal rolls up into its project, so the invoice would
+  // count there as well as here. The deal is read unscoped.
+  const sourceQuoteId = parseInt(req.body.sourceQuoteId, 10);
+  if (sourceQuoteId && await hasColumnCached('quotes', 'project_id')) {
+    const source = await db('quotes').where({ id: sourceQuoteId }).first('project_id', 'deal_uuid');
+    const elsewhere = (source?.project_id != null && Number(source.project_id) !== Number(project.id))
+      || (source?.deal_uuid && await projectService.dealProjectElsewhere(source.deal_uuid, project.id));
+    if (elsewhere) {
+      return { status: 422, body: { error: 'The quote it is made from, or its deal, belongs to another project', code: 'PROJECT_SOURCE_MISMATCH' } };
+    }
+  }
+  const held = await projectService.holdProjectToCustomer(project.id, req.body.customerAccountId);
+  if (!held) {
+    return { status: 422, body: { error: 'That project belongs to a different customer', code: 'PROJECT_CUSTOMER_MISMATCH' } };
+  }
+  req.projectCustomerAdopted = held === 'adopted';
+  return null;
+}
+
 router.post(
   '/',
   requirePermission('bills.manage'),
@@ -460,13 +546,32 @@ router.post(
     if (linkedEvent && !canLinkCrmToEvent(req.admin, await db('events').where({ id: linkedEvent }).first('id', 'created_by'))) {
       return res.status(403).json({ error: 'That event is not yours to link' });
     }
+    const linkedProject = parseInt(req.body.projectId, 10);
+    if (linkedProject) {
+      const refusal = await projectLinkRefusal(req, linkedProject);
+      if (refusal) return res.status(refusal.status).json(refusal.body);
+    }
     // createInvoice always returns `{ invoiceIds: number[] }` —
     // single-installment / standalone case is a one-element array,
     // multi-installment is N (auto-routed through
     // spawnInstallmentInvoices). The response surfaces the first
     // invoice's payload (the one the editor redirects to) plus the
     // full id list so the editor can show "N invoices created".
-    const { invoiceIds } = await invoiceService.createInvoice(mapPayloadToService(req.body), req.admin.id);
+    let created;
+    try {
+      created = await invoiceService.createInvoice(mapPayloadToService(req.body), req.admin.id);
+    } catch (err) {
+      // The invoice was refused after the project adopted its customer: give
+      // the project back, so the next document for the right customer fits.
+      if (linkedProject && req.projectCustomerAdopted) {
+        await require('../services/projectService').releaseAdoptedCustomer(linkedProject, req.body.customerAccountId);
+      }
+      throw err;
+    }
+    const { invoiceIds } = created;
+    if (linkedProject) {
+      await require('../services/projectService').promoteInquiry(linkedProject);
+    }
     const firstId = invoiceIds[0];
     const data = await invoiceService.getInvoiceById(firstId);
     return successResponse(res, {
@@ -865,8 +970,11 @@ router.post(
     const proofInboundIds = Array.isArray(req.body.proofInboundIds)
       ? req.body.proofInboundIds.map((n) => parseInt(n, 10)).filter(Number.isInteger)
       : undefined;
-    await invoiceService.sendInvoice(parseInt(req.params.id, 10), req.admin.id, { proofInboundIds });
-    return successResponse(res, { sent: true });
+    // The admin's Send button is the one caller that may re-send an invoice
+    // that is already out (the "Resend" action).
+    const result = await invoiceService.sendInvoice(parseInt(req.params.id, 10), req.admin.id, { proofInboundIds, allowResend: true });
+    // A double click that waited for the first send reports that send, not one of its own.
+    return successResponse(res, { sent: !!result?.sent, alreadySent: !!result?.alreadySent });
   })
 );
 

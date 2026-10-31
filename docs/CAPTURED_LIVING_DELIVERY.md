@@ -10,8 +10,9 @@ the look comes from `frontend/src/styles/captured-living.css`.
   example Exterior, Living, Kitchen, Dining, Bedrooms, Bathrooms, Twilight,
   Aerial. Remove the wedding defaults you don't use. These become the room
   filter pills under the hero.
-- **Settings → Event Creation → Show filter bar in galleries:** on. The skin
-  hides filename search and sort and keeps only the room pills.
+- **Settings → Event Creation → Show filter bar in galleries:** on. It shows
+  the room pills, and PicPeak's toolbar (search, sort, filters, select) under
+  them.
 - **Settings → Download resolutions:** standard *Original*, picker on,
   *Offer "Original"* on, one size **Web & MLS** at 2048 × 2048.
 - **Branding:** header style *Hero Image*, divider *None*.

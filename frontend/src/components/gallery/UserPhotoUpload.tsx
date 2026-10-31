@@ -12,6 +12,8 @@ import { clearGuestIdentity, getGuestIdentity, getGuestToken, storeGuestIdentity
 import type { GuestNameMode } from '../../types';
 import { useGalleryDialog } from './hooks/useGalleryDialog';
 import { imageLimitMessage, publicUploadErrorKey } from '../../utils/publicUploadErrors';
+import { prepareGuestUpload } from '../../utils/guestUploadDownscale';
+import { getGalleryToken } from '../../utils/galleryAuthStorage';
 
 interface UserPhotoUploadProps {
   eventId: number;
@@ -30,6 +32,9 @@ interface UserPhotoUploadProps {
   // The feedback setting "require name and email" applies to the one guest
   // identity, so registering it from here has to ask for the address too.
   requireEmail?: boolean;
+  // Longest edge photos are scaled to before upload (issue 1733); empty sends
+  // originals.
+  maxEdge?: number | null;
 }
 
 // Signing an established identity out re-keys everything under the
@@ -47,6 +52,7 @@ export const UserPhotoUpload: React.FC<UserPhotoUploadProps> = ({
   nameMode = 'off',
   creditsVisible = false,
   requireEmail = false,
+  maxEdge = null,
 }) => {
   const { t } = useTranslation();
 
@@ -322,6 +328,11 @@ export const UserPhotoUpload: React.FC<UserPhotoUploadProps> = ({
     // is back on screen and says why.
     let stoppedForName = false;
     let stoppedForCapacity = false;
+    // Set when the gallery holds uploads for approval (issue 1733): the
+    // photos are stored, but will not show up until they are approved.
+    let heldForReview = false;
+
+    const galleryToken = slug ? getGalleryToken(slug) : null;
 
     for (const [index, file] of files.entries()) {
       // The gallery's photo limit refuses this file and every one after it:
@@ -331,16 +342,22 @@ export const UserPhotoUpload: React.FC<UserPhotoUploadProps> = ({
         failedCount += files.length - index;
         toast.error(t('upload.photoCapReached', { limit }));
       };
+      // Inside the loop, so only one decoded image is in memory at a time.
+      const prepared = await prepareGuestUpload(file, maxEdge);
       const formData = new FormData();
-      formData.append('photos', file);
+      formData.append('photos', prepared.file);
       if (categoryId) {
         formData.append('category_id', categoryId.toString());
+      }
+      if (prepared.capturedAt) {
+        formData.append('captured_at', prepared.capturedAt);
       }
 
       try {
         const response = await api.post<{
           upload_id?: string;
           count?: number;
+          held_for_review?: boolean;
           errors?: Array<{ filename?: string; error?: string; code?: string; limit?: number }>;
         }>(`/gallery/${eventId}/upload`, formData, {
           headers: {
@@ -349,6 +366,10 @@ export const UserPhotoUpload: React.FC<UserPhotoUploadProps> = ({
             // event id where the interceptor looks for a slug, so it would
             // look the guest token up under the wrong key (#1561).
             ...(uploader.token ? { 'x-guest-token': uploader.token } : {}),
+            // The gallery token too, for the same reason: without it the
+            // server falls back to any gallery cookie, which with a second
+            // gallery open in another tab is that one's, and answers 403.
+            ...(galleryToken ? { Authorization: `Bearer ${galleryToken}` } : {}),
           },
           onUploadProgress: (progressEvent) => {
             if (progressEvent.total) {
@@ -393,6 +414,7 @@ export const UserPhotoUpload: React.FC<UserPhotoUploadProps> = ({
         if (response.data?.upload_id) {
           uploadIds.push(response.data.upload_id);
         }
+        if (response.data?.held_for_review) heldForReview = true;
         successCount++;
       } catch (error: any) {
         if (error.response?.data?.code === 'PHOTO_CAP_REACHED') {
@@ -434,6 +456,9 @@ export const UserPhotoUpload: React.FC<UserPhotoUploadProps> = ({
 
     if (successCount > 0) {
       toast.success(t('toast.uploadSuccess') + ` (${successCount} ${t('common.photos')})`);
+      // Said once, and left up longer: nothing else explains why the grid
+      // does not change.
+      if (heldForReview) toast.info(t('upload.heldForReview'), { autoClose: 10000 });
     }
     if (stoppedForName || stoppedForCapacity) {
       // onUploadComplete closes the dialog, and the guest has a name to enter

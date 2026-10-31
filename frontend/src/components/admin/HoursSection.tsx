@@ -33,6 +33,8 @@ import { useLocalizedDate } from '../../hooks/useLocalizedDate';
 import { useMutationWithToast } from '../../hooks';
 import { ProjectSelect } from './ProjectSelect';
 import { CrossAddInvoiceDialog } from './CrossAddInvoiceDialog';
+import { todayIsoDate } from '../../utils/localDate';
+import { isImeComposing } from '../../utils/imeComposition';
 
 export interface HoursSectionProps {
   customerId: number;
@@ -65,7 +67,7 @@ export const HoursSection: React.FC<HoursSectionProps> = ({
   // authorises the billing itself (#983).
   const canViewAccounting = usePermission('accounting.view');
   const { format: fmtDate, formatTime: fmtTime } = useLocalizedDate();
-  const [entryDate, setEntryDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [entryDate, setEntryDate] = useState(todayIsoDate);
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('10:00');
   const [duration, setDuration] = useState<string>('');
@@ -363,7 +365,7 @@ export const HoursSection: React.FC<HoursSectionProps> = ({
               onChange={(e) => setDuration(e.target.value)}
               onBlur={(e) => applyDuration(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
+                if (e.key === 'Enter' && !isImeComposing(e)) {
                   e.preventDefault();
                   applyDuration((e.target as HTMLInputElement).value);
                 }

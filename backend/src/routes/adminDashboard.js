@@ -1,5 +1,6 @@
 const express = require('express');
 const { db } = require('../database/db');
+const { livePhotos } = require('../utils/photoVisibility');
 const { adminAuth } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { seesAllEvents, scopeEventsQuery } = require('../middleware/ownership');
@@ -91,13 +92,13 @@ router.get('/stats', adminAuth, requirePermission('analytics.view'), async (req,
       .first();
 
     // Get total photos count
-    const totalPhotos = await applyEventScope(db('photos'), req.admin, 'event_id')
+    const totalPhotos = await applyEventScope(livePhotos(db), req.admin, 'event_id')
       .count('id as count')
       .first();
 
     // How many of those rows are videos. totalPhotos stays the count of both
     // types; the dashboard shows the split when this is non-zero.
-    const totalVideos = await applyEventScope(db('photos'), req.admin, 'event_id')
+    const totalVideos = await applyEventScope(livePhotos(db), req.admin, 'event_id')
       .whereRaw(IS_VIDEO_SQL)
       .count('id as count')
       .first();
@@ -236,8 +237,14 @@ router.get('/activity', adminAuth, requirePermission('analytics.view'), async (r
     // the cross-admin actions this advisory is about.
     const activities = await applyEventScope(
       db('activity_logs')
-        .select('activity_logs.*', 'events.event_name')
-        .leftJoin('events', 'activity_logs.event_id', 'events.id'),
+        .select('activity_logs.*', 'events.event_name', 'actor_admin.username as actor_admin_username')
+        .leftJoin('events', 'activity_logs.event_id', 'events.id')
+        // Some admin rows carry the id but no name (services that only know
+        // the acting admin's id); read the current username for those.
+        .leftJoin('admin_users as actor_admin', function joinActorAdmin() {
+          this.on('activity_logs.actor_id', '=', 'actor_admin.id')
+            .andOnVal('activity_logs.actor_type', '=', 'admin');
+        }),
       req.admin,
       'activity_logs.event_id'
     )
@@ -249,7 +256,7 @@ router.get('/activity', adminAuth, requirePermission('analytics.view'), async (r
       id: activity.id,
       type: activity.activity_type,
       actorType: activity.actor_type,
-      actorName: activity.actor_name,
+      actorName: activity.actor_name || activity.actor_admin_username || null,
       eventName: activity.event_name,
       metadata: (() => {
         try {

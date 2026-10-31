@@ -1,15 +1,19 @@
 import React from 'react';
-import { MessageSquare, Star, Heart, Video, Eye, EyeOff } from 'lucide-react';
+import { MessageSquare, Star, Heart, Video } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { PhotoCard } from '../PhotoCard';
 import { firstLookAboveChips } from '../GalleryTileBadges';
+import { ClientVisibilityToggle, isHiddenFromGuests } from '../ClientVisibilityToggle';
 import { FeedbackIdentityModal } from '../../gallery/FeedbackIdentityModal';
 import { feedbackService } from '../../../services/feedback.service';
 import type { BaseGalleryLayoutProps } from './BaseGalleryLayout';
 import type { Photo } from '../../../types';
 import type { GalleryLayoutSettings } from '../../../types/theme.types';
 import { useLazyBands } from './lazyBands';
+import { densityColumnDelta, useGridDensity, type GridDensity } from '../gridDensity';
+import { WINDOW_MIN_PHOTOS } from './rowWindow';
+import { GRID_TILE_ATTR, useGridWindow } from './gridWindow';
 
 interface GridPhotoProps {
   photo: Photo;
@@ -37,6 +41,10 @@ interface GridPhotoProps {
   // Immediate UI like state and callback
   liked?: boolean;
   onLikeSuccess?: () => void;
+  /** The client's hide/show button (#172), when the viewer is the client. */
+  visibilityToggle?: React.ReactNode;
+  /** Dim the photo: the client hid it from guests. */
+  dimmed?: boolean;
 }
 
 const GridPhoto: React.FC<GridPhotoProps> = ({
@@ -57,7 +65,9 @@ const GridPhoto: React.FC<GridPhotoProps> = ({
   onQuickComment,
   onFeedbackChange,
   liked = false,
-  onLikeSuccess
+  onLikeSuccess,
+  visibilityToggle,
+  dimmed = false,
 }) => {
   const bands = useLazyBands();
   const { t } = useTranslation();
@@ -148,7 +158,9 @@ const GridPhoto: React.FC<GridPhotoProps> = ({
       imageProps={{
         src: photo.thumbnail_url || photo.url,
         alt: photo.filename,
-        className: 'w-full h-full object-cover rounded-lg',
+        // The image only, not the tile, so the toggle and the chips stay at
+        // full strength (issue 1992).
+        className: `w-full h-full object-cover rounded-lg${dimmed ? ' opacity-40' : ''}`,
         loading: 'lazy',
         isGallery: true,
         slug,
@@ -169,6 +181,7 @@ const GridPhoto: React.FC<GridPhotoProps> = ({
       onRequireIdentity={onRequireIdentity}
       onIdentitySaved={onIdentitySaved}
       checkboxTestId
+      topLeftControl={visibilityToggle}
     >
       {/* Feedback Indicators (always visible, bottom-left). Show like immediately when user liked */}
       {(commentCount > 0 || averageRating > 0 || likeCount > 0 || liked) && (
@@ -214,15 +227,17 @@ const GridPhoto: React.FC<GridPhotoProps> = ({
 /**
  * The grid's columns and gaps from the theme. Shared with the delivery
  * placeholders (issue 1562), which have to line up with the real tiles above
- * them. The grid-cols classes are safelisted in tailwind.config.
+ * them. The grid-cols classes are safelisted in tailwind.config, up to 12 —
+ * hence the cap once the viewer's density (issue 1733, E4) adds a column.
  */
-export function gridGeometryClass(gallerySettings: GalleryLayoutSettings): string {
+export function gridGeometryClass(gallerySettings: GalleryLayoutSettings, density: GridDensity = 'default'): string {
   const columns = gallerySettings.gridColumns || { mobile: 2, tablet: 3, desktop: 4 };
   const spacing = gallerySettings.spacing || 'normal';
   const scale = gallerySettings.thumbnailScale || 'md';
 
   const scaleOffsets: Record<string, number> = { xs: 3, sm: 1, md: 0, lg: -1, xl: -2 };
-  const applyScale = (cols: number) => Math.max(1, cols + (scaleOffsets[scale] ?? 0));
+  const delta = densityColumnDelta(density);
+  const applyScale = (cols: number) => Math.min(12, Math.max(1, cols + (scaleOffsets[scale] ?? 0) + delta));
   const spacingClass = spacing === 'tight' ? 'gap-2' : spacing === 'relaxed' ? 'gap-6' : 'gap-4';
 
   return `grid ${spacingClass}
@@ -249,10 +264,10 @@ export const GridGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
   isClient = false,
   onToggleVisibility
 }) => {
-  const { t } = useTranslation();
   const { theme } = useTheme();
   const gallerySettings = theme.gallerySettings || {};
   const animation = gallerySettings.photoAnimation || 'fade';
+  const density = useGridDensity();
 
   const [showIdentityModal, setShowIdentityModal] = React.useState(false);
   const [pendingAction, setPendingAction] = React.useState<null | { type: 'like'; photoId: number }>(null);
@@ -267,14 +282,18 @@ export const GridGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
   }, [photos]);
   const [savedIdentity, setSavedIdentity] = React.useState<{ name: string; email: string } | null>(null);
 
-  const gridClass = `photo-grid ${gridGeometryClass(gallerySettings)}`;
+  const gridClass = `photo-grid ${gridGeometryClass(gallerySettings, density)}`;
+
+  // A large gallery mounts only the rows near the viewport (issue 2193).
+  const gridRef = React.useRef<HTMLDivElement>(null);
+  const { tiles, before, after } = useGridWindow(gridRef, photos, photos.length >= WINDOW_MIN_PHOTOS);
 
   return (
-    <div className={gridClass}>
-      {photos.map((photo, index) => {
-        const isHidden = photo.visibility === 'hidden';
+    <div ref={gridRef} className={gridClass}>
+      {before > 0 && <div aria-hidden="true" style={{ gridColumn: '1 / -1', height: before }} />}
+      {tiles.map(({ photo, index }) => {
         return (
-          <div key={photo.id} className={`relative ${isClient && isHidden ? 'opacity-40' : ''}`}>
+          <div key={photo.id} className="relative" {...{ [GRID_TILE_ATTR]: '' }}>
             <GridPhoto
               photo={photo}
               isSelected={selectedPhotos.has(photo.id)}
@@ -307,35 +326,16 @@ export const GridGalleryLayout: React.FC<BaseGalleryLayoutProps> = ({
                   return next;
                 });
               }}
+              // Client visibility toggle (#172) and the dimmed hidden photo.
+              visibilityToggle={isClient && onToggleVisibility
+                ? <ClientVisibilityToggle photo={photo} onToggle={onToggleVisibility} />
+                : undefined}
+              dimmed={isClient && Boolean(onToggleVisibility) && isHiddenFromGuests(photo)}
             />
-            {/* Client visibility toggle overlay (#172) */}
-            {isClient && onToggleVisibility && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleVisibility(photo.id, photo.visibility || 'visible');
-                }}
-                className={`absolute top-2 left-2 z-10 p-1.5 rounded-full shadow-md transition-colors ${
-                  isHidden
-                    ? 'bg-danger text-white hover:opacity-90'
-                    // On the photo: a fixed white chip, whatever the theme.
-                    : 'bg-white/90 text-neutral-700 hover:bg-white'
-                }`}
-                title={isHidden
-                  ? t('clientAccess.hiddenFromGuests', 'Hidden from guests')
-                  : t('clientAccess.visibleToGuests', 'Visible to guests')}
-                aria-label={isHidden
-                  ? t('clientAccess.hiddenFromGuests', 'Hidden from guests')
-                  : t('clientAccess.visibleToGuests', 'Visible to guests')}
-                aria-pressed={isHidden}
-              >
-                {isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            )}
           </div>
         );
       })}
+      {after > 0 && <div aria-hidden="true" style={{ gridColumn: '1 / -1', height: after }} />}
       <FeedbackIdentityModal
         isOpen={showIdentityModal}
         onClose={() => { setShowIdentityModal(false); setPendingAction(null); }}

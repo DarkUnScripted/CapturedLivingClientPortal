@@ -1,9 +1,10 @@
 /**
  * Captured Living: place gallery navigation below the hero photo (fork-only).
  *
- * PicPeak renders the folder navigation and the filter bar (room chips) above
- * the grid wrapper, while the hero photo is drawn inside the grid component,
+ * PicPeak renders the folder navigation, the category chips (our room
+ * filters) and the gallery toolbar above the grid wrapper, while the hero photo is drawn inside the grid component,
  * so in the hero header style they end up between the top bar and the photo.
+ * Order under the photo: deliverables (folders), room chips, toolbar.
  * The design puts the photo first. BelowHeroSlot (mounted right after the hero
  * in PhotoGridWithLayouts) provides the targets, and BelowHero portals its
  * children there. Without a hero (other header styles) BelowHero renders its
@@ -12,7 +13,7 @@
 import React, { useLayoutEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-type Slot = 'nav' | 'filters';
+type Slot = 'nav' | 'filters' | 'toolbar';
 
 const CHANGE_EVENT = 'cl-below-hero-change';
 
@@ -28,6 +29,7 @@ export const BelowHeroSlot: React.FC = () => {
     <div className="cl-below-hero">
       <div data-cl-slot="nav" />
       <div data-cl-slot="filters" />
+      <div data-cl-slot="toolbar" />
     </div>
   );
 };

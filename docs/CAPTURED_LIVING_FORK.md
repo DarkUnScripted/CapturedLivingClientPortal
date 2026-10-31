@@ -28,6 +28,8 @@ Fork-only files (PicPeak doesn't have them, so they never conflict):
 | `scripts/captured-living/deploy.sh` | Server side of a deploy: backup, pull, health check, rollback |
 | `docs/CAPTURED_LIVING_FORK.md` | This page |
 | `docs/CAPTURED_LIVING_SETUP.md` | Step-by-step setup of GitHub and the VPS |
+| `docs/CAPTURED_LIVING_DELIVERY.md` | How to set up a listing gallery (rooms, folders, MLS links) |
+| `frontend/src/styles/captured-living.css`, `frontend/src/captured-living/` | The design: skin and small components |
 
 ## Getting updates
 

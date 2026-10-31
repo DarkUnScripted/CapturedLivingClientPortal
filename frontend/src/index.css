@@ -5,6 +5,7 @@
 @import './styles/tokens.css';
 /* Captured Living gallery skin (fork-only, see the file's header). */
 @import './styles/captured-living.css';
+@import './styles/captured-living-listing.css';
 
 /*
  * Self-hosted Inter is bootstrapped here so the very first paint —

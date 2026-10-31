@@ -28,6 +28,7 @@ import {
 } from './layouts';
 import { HeroHeader } from './HeroHeader';
 import type { HeaderStyleType, HeroDividerStyle } from '../../types/theme.types';
+import { BelowHeroSlot } from '../../captured-living/BelowHero';
 
 interface PhotoGridWithLayoutsProps {
   photos: Photo[];
@@ -551,6 +552,8 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
           heroImageAnchor={heroImageAnchor}
         />
       )}
+      {/* Captured Living: folder nav and room filters move here (captured-living/BelowHero). */}
+      {showHeroHeader && !isFullPageLayout && <BelowHeroSlot />}
 
       {/* Welcome Message - shown for non-fullpage layouts when set */}
       {!isFullPageLayout && welcomeMessage && (

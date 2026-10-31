@@ -93,6 +93,7 @@ import { useLocalizedDate } from '../../hooks/useLocalizedDate';
 import type { Photo } from '../../types';
 import { GALLERY_THEME_PRESETS } from '../../types/theme.types';
 import { useQueryClient } from '@tanstack/react-query';
+import { BelowHero } from '../../captured-living/BelowHero';
 
 interface GalleryViewProps {
   slug: string;
@@ -2178,6 +2179,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
             the gallery actually has photos (avoids the empty "Search photos
             by filename" row from discussion #317). */}
         {toolbarShown ? (
+          <BelowHero slot="toolbar" enabled={isHeroHeader}>
           <GalleryToolbar
             className="mt-3"
             search={filterBarShown ? { value: searchTerm, onChange: setSearchTerm } : undefined}
@@ -2242,6 +2244,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
               tray: { photos: selectedPhotoList, onRemove: deselectPhoto, slug },
             }}
           />
+          </BelowHero>
         ) : null}
 
         {/* Categories stay on the page, under the toolbar: they are how a
@@ -2250,14 +2253,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
             filter category are separate fields, so the chips work inside a
             folder and in "All photos" too. */}
         {filterBarShown && (
+          <BelowHero slot="filters" enabled={isHeroHeader}>
           <GalleryCategoryChips
-            className="mt-4"
+            className="mt-4 photo-filter-categories"
             categories={filterCategories(data.categories)}
             photos={scopedPhotos}
             selectedCategoryId={selectedCategoryId}
             onCategoryChange={setSelectedCategoryId}
             hasVideos={showMediaFilter}
           />
+          </BelowHero>
         )}
 
         {/* People in this gallery (#1074). Sits between the filter bar and
@@ -2374,7 +2379,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ slug, event, requiresP
               <DownloadQuotaNotice />
             </div>
           )}
-          {folderNav}
+          <BelowHero slot="nav" enabled={isHeroHeader}>{folderNav}</BelowHero>
           {/* A gallery whose photos ALL live in folders has an empty root grid,
               and PhotoGridWithLayouts unconditionally renders "no photos found"
               — directly under the tiles that prove otherwise. Skip the grid when

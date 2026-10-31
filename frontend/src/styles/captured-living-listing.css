@@ -1,0 +1,75 @@
+/*
+ * Captured Living: listing deliverables, room filters and MLS links (fork-only).
+ *
+ * Companion to captured-living.css (which defines the --cl-* colours on
+ * .gallery-page); kept in its own file so the two can change independently.
+ */
+
+/* ---- Below the hero: deliverables (folders) and room filters -------------
+   captured-living/BelowHero.tsx moves PicPeak's folder navigation, category
+   chips and gallery toolbar under the hero photo. */
+
+/* The photo wrapper keeps the extra top margin PicPeak gives it when the
+   filter bar sat above the hero; without the bar there, close the gap. */
+.gallery-page main > .mt-12:has(> .gallery-hero-header) {
+  margin-top: 1.5rem;
+}
+
+.gallery-page .cl-below-hero > div:not(:empty) {
+  margin-bottom: 1.5rem;
+}
+
+.gallery-page .cl-below-hero .mt-6 {
+  margin-top: 0;
+}
+
+/* Deliverables: PicPeak's folder tiles (Photos, Video, Floor plan, Aerial). */
+.gallery-page .gallery-folder-tiles h2 {
+  font-family: var(--heading-font-family, Georgia, serif);
+  font-weight: 400;
+  font-size: 1.5rem;
+  color: var(--color-text);
+}
+
+.gallery-page .gallery-folder-tile {
+  border-radius: 2px;
+  background-color: #FBF9F5;
+}
+
+.gallery-page .gallery-folder-tile:hover {
+  box-shadow: none;
+  border-color: var(--cl-charcoal);
+}
+
+/* Room filters: PicPeak's category chips (GalleryCategoryChips). */
+.gallery-page .photo-filter-categories .btn-primary,
+.gallery-page .photo-filter-categories .btn-outline {
+  min-height: 40px;
+  padding: 0 1rem;
+  border-radius: 999px;
+}
+
+.gallery-page .photo-filter-categories .btn-primary {
+  background-color: var(--cl-charcoal);
+  border-color: var(--cl-charcoal);
+  color: var(--cl-paper);
+}
+
+.gallery-page .photo-filter-categories .btn-outline {
+  background-color: transparent;
+  border-color: #C9C2B5;
+  color: var(--color-text);
+}
+
+/* Links note (per-gallery info banner): unbranded MLS video, 3D tour. */
+.gallery-page .gallery-info-banner {
+  background-color: #FBF9F5;
+  border-bottom-color: #D9D3C7;
+}
+
+.gallery-page .gallery-info-banner a {
+  color: #8A5E0F;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

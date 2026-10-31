@@ -15,6 +15,7 @@ import {
 } from '../../utils/downloadLimit';
 import { DownloadQuotaNotice } from './DownloadQuotaNotice';
 import { useGalleryDialog } from './hooks/useGalleryDialog';
+import { describeChoice, orderChoices, recommendedChoiceId } from '../../captured-living/downloadChoices';
 
 /**
  * Resolution picker for gallery downloads (#858).
@@ -94,7 +95,8 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
   const { watermarked } = useDownloadChoice();
   const overQuota = !!quotaPhotos && !downloadQuota.allows(quotaPhotos);
   const [phase, setPhase] = useState<Phase>(resumeToken ? 'preparing' : 'choose');
-  const [selected, setSelected] = useState<string>(choices[0]?.id ?? 'original');
+  // Captured Living: preselect the recommended (web/MLS) size, not Original.
+  const [selected, setSelected] = useState<string>(recommendedChoiceId(choices) ?? 'original');
   const [error, setError] = useState<string | null>(null);
   const [photoCount, setPhotoCount] = useState(0);
   const [notify, setNotify] = useState<DownloadJobState['notify'] | 'failed'>(undefined);
@@ -304,7 +306,7 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
         aria-label={title}
         // Scrolls inside the viewport: the hints make the list tall on a
         // short phone screen, and the body behind it does not scroll.
-        className="card-themed text-theme p-6 max-w-md w-full max-h-full overflow-y-auto overscroll-contain"
+        className="gallery-download-modal card-themed text-theme p-6 max-w-md w-full max-h-full overflow-y-auto overscroll-contain"
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 mb-4">
@@ -326,13 +328,15 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
             <fieldset className="mb-5">
               <legend className="sr-only">{title}</legend>
               <div className="space-y-2">
-                {choices.map((choice) => {
+                {orderChoices(choices).map((choice) => {
                   const kind = downloadChoiceKind(choice);
                   const size = sizeLine(choice);
+                  // Captured Living: listing wording (captured-living/downloadChoices).
+                  const text = describeChoice(choice, choices, t);
                   return (
                     <label
                       key={choice.id}
-                      className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                      className={`gallery-download-choice ${selected === choice.id ? 'is-selected' : ''} flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
                         selected === choice.id
                           ? 'border-accent bg-accent-soft'
                           : 'border-border-token hover-surface'
@@ -347,11 +351,16 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
                         className="accent-accent mt-1"
                       />
                       <span className="flex-1 min-w-0">
-                        <span className="block text-sm font-medium text-theme">
-                          {kind === 'original' ? t('gallery.downloadMenu.original', 'Original') : choice.label}
+                        <span className="flex items-center gap-2 text-sm font-medium text-theme">
+                          {text.label ?? (kind === 'original' ? t('gallery.downloadMenu.original', 'Original') : choice.label)}
+                          {text.recommended && (
+                            <span className="gallery-download-badge">
+                              {t('capturedLiving.download.recommended', { defaultValue: 'Recommended' })}
+                            </span>
+                          )}
                         </span>
                         <span className="block text-xs text-muted-theme">
-                          {t(`gallery.downloadMenu.hint.${kind}`, HINT_FALLBACK[kind])}
+                          {text.hint ?? t(`gallery.downloadMenu.hint.${kind}`, HINT_FALLBACK[kind])}
                         </span>
                         {size && (
                           <span className="block text-xs text-muted-theme tabular-nums">

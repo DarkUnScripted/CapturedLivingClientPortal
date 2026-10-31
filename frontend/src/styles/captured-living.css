@@ -208,6 +208,50 @@
   border-radius: 2px;
 }
 
+/* ---- Download-size dialog ------------------------------------------------- */
+
+.gallery-page .gallery-download-modal {
+  border-radius: 4px;
+}
+
+.gallery-download-modal h2 {
+  font-family: var(--heading-font-family, Georgia, serif);
+  font-weight: 400;
+  font-size: 1.5rem;
+}
+
+.gallery-page .gallery-download-modal .gallery-download-choice {
+  border-radius: 4px;
+  padding: 0.9rem 1rem;
+}
+
+.gallery-download-modal .gallery-download-choice .text-sm {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.gallery-download-modal .gallery-download-choice .text-xs {
+  font-size: 0.85rem;
+}
+
+.gallery-download-modal .gallery-download-choice.is-selected {
+  border-color: var(--cl-charcoal);
+  box-shadow: inset 0 0 0 1px var(--cl-charcoal);
+  background-color: #FFFFFF;
+}
+
+.gallery-download-modal .gallery-download-choice input {
+  accent-color: var(--cl-charcoal);
+}
+
+.gallery-download-badge {
+  padding: 0.125rem 0.5rem;
+  background-color: #F3E6C8;
+  color: #6B4A0C;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
 /* ---- Footer ----------------------------------------------------------------- */
 
 .gallery-page .gallery-footer {

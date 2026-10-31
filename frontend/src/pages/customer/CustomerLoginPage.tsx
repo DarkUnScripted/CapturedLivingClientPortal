@@ -48,12 +48,14 @@ export const CustomerLoginPage: React.FC = () => {
   // drives the theme-aware logo pick. A framed logo sits on a fixed cream
   // plate (see render), so the light (dark-ink) logo always reads there;
   // only the frameless logo sits on the themed (possibly dark) page bg.
-  const { isDark } = usePublicDarkMode();
+  usePublicDarkMode();
   const companyName = settingsData?.branding_company_name?.trim() || 'PicPeak';
   const lightLogo = settingsData?.branding_logo_url?.trim();
   const darkLogo = settingsData?.branding_logo_url_dark?.trim();
   const loginFrameEnabled = settingsData?.branding_login_logo_frame_enabled !== false;
-  const themedLogo = isDark ? (darkLogo || lightLogo) : (lightLogo || darkLogo);
+  // Captured Living: the page is charcoal in our theme
+  // (styles/captured-living.css), so the dark-background logo comes first.
+  const themedLogo = darkLogo || lightLogo;
   const logoUrl = loginFrameEnabled ? (lightLogo || darkLogo) : themedLogo;
   const resolvedLogoUrl = logoUrl || '/picpeak-logo-transparent.png';
 
@@ -132,7 +134,7 @@ export const CustomerLoginPage: React.FC = () => {
       // landings feel like the same product: tinted logo frame above
       // the title, "Need help?" support email below the form, "Powered
       // by PicPeak" footer line. Colours are the operator's theme tokens.
-      className="min-h-screen flex items-center justify-center p-4 bg-background"
+      className="cl-access-page min-h-screen flex items-center justify-center p-4 bg-background"
     >
       <div className="w-full max-w-md">
         {/* Logo / header — matches AdminLoginPage. The frame and size
@@ -163,7 +165,7 @@ export const CustomerLoginPage: React.FC = () => {
               />
             );
           })()}
-          <h1 className="text-3xl font-bold text-theme">
+          <h1 className="cl-access-title text-3xl font-bold text-theme">
             {t('customer.login.title', 'Customer login')}
           </h1>
           <p className="mt-2 text-theme opacity-70">

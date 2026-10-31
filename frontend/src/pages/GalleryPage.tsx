@@ -494,22 +494,24 @@ export const GalleryPage: React.FC = () => {
 
   // Show login form
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-background, #fafafa)' }}>
+    <div className="cl-access-page min-h-screen" style={{ backgroundColor: 'var(--color-background, #fafafa)' }}>
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-lg">
           {/* Logo/Header. The logo can be hidden per gallery (#894). */}
           <div className="text-center mb-4 sm:mb-6">
             {galleryInfo?.login_logo_visible !== false && (
               <img
-                src={settingsData?.branding_logo_url ?
-                  buildResourceUrl(settingsData.branding_logo_url) :
+                // Captured Living: this page is charcoal in our theme, so the
+                // dark-background logo comes first.
+                src={(settingsData?.branding_logo_url_dark || settingsData?.branding_logo_url) ?
+                  buildResourceUrl((settingsData?.branding_logo_url_dark || settingsData?.branding_logo_url) as string) :
                   '/picpeak-logo-transparent.png'
                 }
                 alt={settingsData?.branding_company_name || 'PicPeak'}
-                className="h-12 sm:h-16 lg:h-20 w-auto object-contain mx-auto mb-3 sm:mb-4"
+                className="cl-access-logo h-12 sm:h-16 lg:h-20 w-auto object-contain mx-auto mb-3 sm:mb-4"
               />
             )}
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2 px-2" style={{ color: 'var(--color-accent-dark)' }}>
+            <h1 className="cl-access-title text-2xl sm:text-3xl lg:text-4xl font-bold mb-2 px-2" style={{ color: 'var(--color-accent-dark)' }}>
               {galleryInfo?.event_name}
             </h1>
           </div>

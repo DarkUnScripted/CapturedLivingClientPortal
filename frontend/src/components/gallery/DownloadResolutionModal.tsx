@@ -1,14 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, Check, AlertCircle, X, Loader2 } from 'lucide-react';
+import { Download, Check, AlertCircle, X, Loader2, Mail } from 'lucide-react';
 
 import { Button } from '../common';
 import { galleryService } from '../../services/gallery.service';
-import type { DownloadResolutionChoice, DownloadJobStatus } from '../../types';
+import type { DownloadResolutionChoice, DownloadJobState, DownloadJobStatus } from '../../types';
 import { useDownloadQuota } from '../../contexts/DownloadQuotaContext';
+import { useDownloadChoice } from '../../contexts/DownloadChoiceContext';
+import { downloadChoiceKind, knownTotalBytes } from '../../utils/downloadChoice';
+import { formatFileSize } from '../../utils/fileSize';
 import {
-  isDownloadLimitError, isGalleryLimited, notifyDownloadQuotaChanged, showDownloadLimitReached,
-  type QuotaPhoto,
+  isDownloadLimitError, isGalleryLimited, isSelectionTooLargeError, notifyDownloadQuotaChanged,
+  selectionTooLargeMessage, showDownloadLimitReached, type QuotaPhoto,
 } from '../../utils/downloadLimit';
 import { DownloadQuotaNotice } from './DownloadQuotaNotice';
 import { useGalleryDialog } from './hooks/useGalleryDialog';
@@ -26,7 +29,26 @@ import { useGalleryDialog } from './hooks/useGalleryDialog';
  * The download itself is a native browser navigation, so the archive streams
  * with Content-Length and the browser shows a real progress bar rather than
  * us buffering a multi-GB blob in memory.
+ *
+ * While preparing, a visitor the server holds an address for can ask to be
+ * mailed instead of waiting (issue 1733). The link in that mail opens the
+ * gallery with `resumeToken`, which starts this dialog at that job.
+ *
+ * It is also the download menu for one photo (issue 1733, E2): with `onPick`
+ * the choice is handed back to start that photo's download, no job involved.
+ * Each size says in plain words what it is for, the file size where the
+ * payload knows it, and what the gallery's protection does to it.
  */
+
+/** What the size line can tell about a photo; GalleryPhoto fits. */
+type SizedPhoto = QuotaPhoto & { size?: number | null; width?: number | null; height?: number | null };
+
+const HINT_FALLBACK: Record<ReturnType<typeof downloadChoiceKind>, string> = {
+  original: 'Full quality, as the photographer delivered it — best for printing.',
+  print: 'High resolution — for prints and large screens.',
+  screen: 'Web size — for screens, sharing and social media.',
+  small: 'Smallest file — quick to send in messages.',
+};
 
 const POLL_MS = 1500;
 // Give up after ~10 minutes of polling. The job may well still finish server
@@ -43,8 +65,16 @@ interface DownloadResolutionModalProps {
   /** Omitted = the whole gallery. */
   photoIds?: number[];
   /** The photos this download would ship, priced against the download limit (issue 1560). */
-  quotaPhotos?: QuotaPhoto[];
+  quotaPhotos?: SizedPhoto[];
+  /** One photo's download menu (issue 1733, E2): its own pixel and file size. */
+  photo?: SizedPhoto;
+  /** Download menu mode: the picked size goes back here instead of a job. */
+  onPick?: (resolution: string) => void;
+  /** A job to pick up again, from the "your download is ready" mail (issue 1733). */
+  resumeToken?: string;
   onClose: () => void;
+  /** Called, before onClose, once a download was handed to the browser. */
+  onDownloaded?: () => void;
 }
 
 export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = ({
@@ -53,20 +83,29 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
   standardResolution,
   photoIds,
   quotaPhotos,
+  photo,
+  onPick,
+  resumeToken,
   onClose,
+  onDownloaded,
 }) => {
   const { t } = useTranslation();
   const downloadQuota = useDownloadQuota();
+  const { watermarked } = useDownloadChoice();
   const overQuota = !!quotaPhotos && !downloadQuota.allows(quotaPhotos);
-  const [phase, setPhase] = useState<Phase>('choose');
+  const [phase, setPhase] = useState<Phase>(resumeToken ? 'preparing' : 'choose');
   const [selected, setSelected] = useState<string>(choices[0]?.id ?? 'original');
   const [error, setError] = useState<string | null>(null);
   const [photoCount, setPhotoCount] = useState(0);
-  const tokenRef = useRef<string | null>(null);
+  const [notify, setNotify] = useState<DownloadJobState['notify'] | 'failed'>(undefined);
+  const tokenRef = useRef<string | null>(resumeToken ?? null);
   // Guards the polling loop against running on after unmount / close.
   const activeRef = useRef(true);
 
-  useEffect(() => () => { activeRef.current = false; }, []);
+  useEffect(() => {
+    activeRef.current = true;
+    return () => { activeRef.current = false; };
+  }, []);
 
   const filename = `${slug}-${selected === 'original' ? 'original' : selected}.zip`;
 
@@ -78,6 +117,8 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
       try {
         const state = await galleryService.getDownloadJob(slug, token);
         setPhotoCount(state.photo_count || 0);
+        // A failed request stays shown; the poll must not offer it again.
+        setNotify((current) => (current === 'failed' ? current : state.notify));
         if (state.status === 'ready') {
           setPhase('ready');
           return;
@@ -98,12 +139,18 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
   }, [slug, t]);
 
   const start = useCallback(async () => {
+    if (onPick) {
+      onPick(selected);
+      onClose();
+      return;
+    }
     // Whole-gallery download at the gallery's OWN standard size is exactly
     // what the pre-built archive already contains — take it instead of
     // re-resizing and re-packaging the entire gallery for the same bytes.
     if (!photoIds && selected === standardResolution) {
       try {
         await galleryService.downloadAllPhotos(slug, true);
+        onDownloaded?.();
       } catch (err) {
         // The limit refusal already told the guest why (issue 1560).
         if (!isDownloadLimitError(err)) throw err;
@@ -114,6 +161,8 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
 
     setPhase('preparing');
     setError(null);
+    // A new job: a mail request that failed for the last one says nothing about it.
+    setNotify(undefined);
     try {
       const job = await galleryService.startDownloadJob(slug, selected, photoIds);
       tokenRef.current = job.token;
@@ -125,12 +174,50 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
       }
       await poll(job.token);
     } catch (err) {
-      setError(isDownloadLimitError(err)
+      setError(isSelectionTooLargeError(err)
+        ? selectionTooLargeMessage(err.info.limit)
+        : isDownloadLimitError(err)
         ? t('gallery.downloadLimit.reached', 'Download limit reached. Please contact your photographer for more downloads.')
         : t('gallery.downloadPrepFailed', 'Preparation failed'));
       setPhase('error');
     }
-  }, [slug, selected, photoIds, poll, t, standardResolution, onClose]);
+  }, [slug, selected, photoIds, poll, t, standardResolution, onClose, onDownloaded, onPick]);
+
+  // Pick a job up again from the mail link. It may have been swept since
+  // (retention passed, or the gallery changed), which reads as not found;
+  // not swept yet, it says `unavailable`.
+  useEffect(() => {
+    if (!resumeToken) return;
+    (async () => {
+      try {
+        const state = await galleryService.getDownloadJob(slug, resumeToken);
+        if (!activeRef.current) return;
+        if (state.status === 'failed' || state.unavailable) throw new Error('gone');
+        setSelected(state.resolution);
+        if (state.status === 'ready') {
+          setPhase('ready');
+          return;
+        }
+        setNotify(state.notify);
+        await poll(resumeToken);
+      } catch {
+        if (!activeRef.current) return;
+        setError(t('gallery.downloadGone', 'This download is no longer available. Please request it again.'));
+        setPhase('error');
+      }
+    })();
+  }, [resumeToken, slug, poll, t]);
+
+  const requestMail = useCallback(async () => {
+    const token = tokenRef.current;
+    if (!token) return;
+    try {
+      await galleryService.requestDownloadJobMail(slug, token);
+      setNotify('requested');
+    } catch {
+      setNotify('failed');
+    }
+  }, [slug]);
 
   const download = useCallback(async () => {
     const token = tokenRef.current;
@@ -153,28 +240,76 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
       }
     }
     galleryService.downloadJobFile(slug, token, filename);
+    onDownloaded?.();
     onClose();
-  }, [slug, filename, onClose, t]);
+  }, [slug, filename, onClose, onDownloaded, t]);
+
+  // The original's file size, only where the payload knows it exactly: one
+  // photo, or a selection (all loaded, as they were picked). Not for the
+  // whole gallery — the list may be paged — and not with a watermark, which
+  // re-encodes the file.
+  const originalBytes = watermarked ? null
+    : photo ? knownTotalBytes([photo])
+    : photoIds && quotaPhotos
+      ? knownTotalBytes(quotaPhotos.filter((p) => p.category_allow_downloads !== false))
+      : null;
+
+  const sizeLine = (choice: DownloadResolutionChoice): string | null => {
+    if (choice.width && choice.height) {
+      return t('gallery.resolutionUpTo', 'up to {{width}} × {{height}} px', {
+        width: choice.width,
+        height: choice.height,
+      });
+    }
+    const parts: string[] = [];
+    if (photo?.width && photo?.height) {
+      parts.push(t('gallery.downloadMenu.pixels', '{{width}} × {{height}} px', { width: photo.width, height: photo.height }));
+    }
+    if (originalBytes) {
+      parts.push(photo
+        ? formatFileSize(originalBytes)
+        : t('gallery.downloadMenu.totalSize', '{{size}} in total', { size: formatFileSize(originalBytes) }));
+    }
+    return parts.length > 0 ? parts.join(' · ') : null;
+  };
+
+  // The original is not among the sizes: say so, rather than let "Large"
+  // pass for it.
+  const largest = choices[0];
+  const noOriginal = !choices.some((c) => c.id === 'original') && largest?.width && largest?.height
+    ? t('gallery.downloadMenu.noOriginal', 'The original files are not offered in this gallery. The largest size is up to {{width}} × {{height}} px.', {
+      width: largest.width,
+      height: largest.height,
+    })
+    : null;
+
+  const title = resumeToken
+    ? t('gallery.preparedDownload', 'Your prepared download')
+    : t('gallery.chooseResolution', 'Choose a download size');
 
   const panelRef = useRef<HTMLDivElement>(null);
   useGalleryDialog({ open: true, onClose, panelRef });
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4"
+      // Above the Premium lightbox, whose portal sits at z-index 9999: the
+      // single-photo menu (issue 1733, E2) opens over it.
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[10000] p-4"
       onClick={onClose}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={t('gallery.chooseResolution', 'Choose a download size')}
-        className="card-themed text-theme p-6 max-w-md w-full"
+        aria-label={title}
+        // Scrolls inside the viewport: the hints make the list tall on a
+        // short phone screen, and the body behind it does not scroll.
+        className="card-themed text-theme p-6 max-w-md w-full max-h-full overflow-y-auto overscroll-contain"
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 mb-4">
           <h2 className="text-lg font-semibold text-theme">
-            {t('gallery.chooseResolution', 'Choose a download size')}
+            {title}
           </h2>
           <button
             type="button"
@@ -188,40 +323,58 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
 
         {phase === 'choose' && (
           <>
-            <div className="space-y-2 mb-5">
-              {choices.map((choice) => (
-                <label
-                  key={choice.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    selected === choice.id
-                      ? 'border-accent bg-accent-soft'
-                      : 'border-border-token hover-surface'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="download-resolution"
-                    value={choice.id}
-                    checked={selected === choice.id}
-                    onChange={() => setSelected(choice.id)}
-                    className="accent-accent"
-                  />
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-medium text-theme">
-                      {choice.label}
-                    </span>
-                    {choice.width && choice.height && (
-                      <span className="block text-xs text-muted-theme">
-                        {t('gallery.resolutionUpTo', 'up to {{width}} × {{height}} px', {
-                          width: choice.width,
-                          height: choice.height,
-                        })}
+            <fieldset className="mb-5">
+              <legend className="sr-only">{title}</legend>
+              <div className="space-y-2">
+                {choices.map((choice) => {
+                  const kind = downloadChoiceKind(choice);
+                  const size = sizeLine(choice);
+                  return (
+                    <label
+                      key={choice.id}
+                      className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                        selected === choice.id
+                          ? 'border-accent bg-accent-soft'
+                          : 'border-border-token hover-surface'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="download-resolution"
+                        value={choice.id}
+                        checked={selected === choice.id}
+                        onChange={() => setSelected(choice.id)}
+                        className="accent-accent mt-1"
+                      />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium text-theme">
+                          {kind === 'original' ? t('gallery.downloadMenu.original', 'Original') : choice.label}
+                        </span>
+                        <span className="block text-xs text-muted-theme">
+                          {t(`gallery.downloadMenu.hint.${kind}`, HINT_FALLBACK[kind])}
+                        </span>
+                        {size && (
+                          <span className="block text-xs text-muted-theme tabular-nums">
+                            {size}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                </label>
-              ))}
-            </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+            {/* What the gallery's protection makes of every size above. */}
+            {(watermarked || noOriginal) && (
+              <ul className="mb-4 space-y-1 text-xs text-muted-theme">
+                {watermarked && (
+                  <li>{t('gallery.downloadMenu.watermarked', 'Every size carries the photographer\'s watermark, the original too.')}</li>
+                )}
+                {noOriginal && (
+                  <li>{noOriginal}</li>
+                )}
+              </ul>
+            )}
             {quotaPhotos && downloadQuota.limited && (
               <DownloadQuotaNotice photos={quotaPhotos} className="mb-4" />
             )}
@@ -230,7 +383,7 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
                 {t('common.cancel', 'Cancel')}
               </Button>
               <Button variant="primary" onClick={start} disabled={overQuota} leftIcon={<Download className="w-4 h-4" />}>
-                {t('gallery.prepareDownload', 'Prepare download')}
+                {onPick ? t('gallery.downloadNow', 'Download') : t('gallery.prepareDownload', 'Prepare download')}
               </Button>
             </div>
           </>
@@ -247,6 +400,21 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
                 ? t('gallery.preparingProgress', '{{count}} photos packaged', { count: photoCount })
                 : t('gallery.preparingHint', 'Resizing photos — this can take a moment for large galleries.')}
             </p>
+            {notify === 'available' && (
+              <Button variant="outline" size="sm" className="mt-4" onClick={requestMail} leftIcon={<Mail className="w-4 h-4" />}>
+                {t('gallery.downloadNotify', 'Email me when it is ready')}
+              </Button>
+            )}
+            {notify === 'requested' && (
+              <p className="text-xs text-theme mt-4" role="status">
+                {t('gallery.downloadNotifyRequested', 'We will email you when the download is ready. You can close this window.')}
+              </p>
+            )}
+            {notify === 'failed' && (
+              <p className="text-xs text-theme mt-4" role="alert">
+                {t('gallery.downloadNotifyFailed', 'The email notification could not be set up. Please keep this window open.')}
+              </p>
+            )}
           </div>
         )}
 
@@ -272,9 +440,12 @@ export const DownloadResolutionModal: React.FC<DownloadResolutionModalProps> = (
               <Button variant="outline" onClick={onClose}>
                 {t('common.close', 'Close')}
               </Button>
-              <Button variant="primary" onClick={() => setPhase('choose')}>
-                {t('common.retry', 'Try again')}
-              </Button>
+              {/* A resumed job has no selection behind it to prepare again. */}
+              {!resumeToken && (
+                <Button variant="primary" onClick={() => setPhase('choose')}>
+                  {t('common.retry', 'Try again')}
+                </Button>
+              )}
             </div>
           </div>
         )}

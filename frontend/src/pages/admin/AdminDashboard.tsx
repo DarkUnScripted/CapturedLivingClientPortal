@@ -30,13 +30,16 @@ import { UpdateNotification } from '../../components/admin/UpdateNotification';
 import { SectionPageHeader } from '../../components/admin/SectionPageHeader';
 import { WhatsNewBanner } from '../../components/admin/WhatsNewBanner';
 import { CrmOverviewSection } from '../../components/admin/CrmOverviewSection';
+import { ProjectsDashboardCard } from '../../components/admin/ProjectsDashboardCard';
 import { useQuery } from '@tanstack/react-query';
 import { eventsService } from '../../services/events.service';
-import { deliveryDue } from './event-details/deliveryStatus';
+import { useDeliveryDue } from './event-details/deliveryStatus';
 import { adminService, ActivityType, type Activity } from '../../services/admin.service';
 import { mediaSplitLabel, splitMediaCount } from '../../utils/mediaCounts';
 import { workflowsService } from '../../services/workflows.service';
+import { approvalEntityHref, approvalPrompt } from '../../utils/workflowApprovals';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
+import { usePermissions } from '../../contexts/PermissionsContext';
 
 interface StatCard {
   title: string;
@@ -63,8 +66,9 @@ export function buildActivityParams(activity: Activity): Record<string, unknown>
   return {
     ...activity.metadata,
     // Team and review lines (issue 743) also record the name, which outlives
-    // a deleted gallery.
-    eventName: activity.eventName || activity.metadata?.eventName || t('common.unknown'),
+    // a deleted gallery; event_deleted records it as event_name.
+    eventName: activity.eventName || activity.metadata?.eventName || activity.metadata?.event_name
+      || t('common.unknown'),
     email: activity.metadata?.email || activity.actorName || '',
     count: activity.metadata?.count || 0,
     template: activity.metadata?.template_key || '',
@@ -90,7 +94,8 @@ export function activityMessageKey(activity: Activity): string {
 export const AdminDashboard: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { format, formatDistanceToNow } = useLocalizedDate();
+  const { format, formatExpiry, formatDistanceToNow } = useLocalizedDate();
+  const deliveryDue = useDeliveryDue();
 
   // Fetch dashboard statistics
   const { data: dashboardStats, isLoading: statsLoading } = useQuery({
@@ -134,13 +139,15 @@ export const AdminDashboard: React.FC = () => {
   // Two-stage delivery (issue 1562): galleries whose first look is out and
   // whose full delivery is still owed, soonest promise first. The card only
   // renders when there are any.
+  // The server orders by due date (no date last) before LIMIT, so these five
+  // are the soonest of all of them, not of whichever 20 came back first.
   const { data: awaitingData } = useQuery({
     queryKey: ['admin-events-summary', 'awaiting_delivery'],
-    queryFn: () => eventsService.getEvents({ limit: 20, status: 'awaiting_delivery' }),
+    queryFn: () => eventsService.getEvents({
+      limit: 5, status: 'awaiting_delivery', sortBy: 'delivery_due_at', sortOrder: 'asc',
+    }),
   });
-  const awaitingEvents = [...(awaitingData?.events || [])]
-    .sort((a, b) => (Date.parse(a.delivery_due_at || '') || Infinity) - (Date.parse(b.delivery_due_at || '') || Infinity))
-    .slice(0, 5);
+  const awaitingEvents = awaitingData?.events ?? [];
 
   // Keep the "expiring soon" card honest when a row crosses its expiry while
   // the dashboard sits open (#909 review). Filtering client-side desynced the
@@ -162,6 +169,10 @@ export const AdminDashboard: React.FC = () => {
   // Pending workflow approvals — only when the workflow engine is live. These
   // are the human-in-the-loop gates (e.g. "review invoice before sending").
   const { flags } = useFeatureFlags();
+  const { hasPermission } = usePermissions();
+  // NewInquiryPage: the projects routes sit under the CRM (`clients`) gate,
+  // and creating a project needs events.edit (adminProjects.js).
+  const canStartInquiry = !!flags.clients && !!flags.projects && hasPermission('events.edit');
   const { data: pendingApprovals } = useQuery({
     queryKey: ['workflow-approvals'],
     queryFn: () => workflowsService.approvals(),
@@ -173,17 +184,6 @@ export const AdminDashboard: React.FC = () => {
     successMessage: t('workflows.approvals.acted', 'Done') as string,
     errorMessage: t('common.error', 'Something went wrong') as string,
   });
-
-  // Admin detail route for an approval's run entity, so clicking opens the
-  // document under review. Mirrors WorkflowApprovalsPage (`invoice` → /bills).
-  const approvalEntityHref = (a: { entity_type?: string | null; entity_id?: number | null }): string | null => {
-    if (!a.entity_type || a.entity_id == null) return null;
-    const base: Record<string, string> = {
-      quote: 'quotes', invoice: 'bills', event: 'events', contract: 'contracts', customer: 'customers',
-    };
-    const seg = base[a.entity_type];
-    return seg ? `/admin/${seg}/${a.entity_id}` : null;
-  };
 
   const isLoading = statsLoading || eventsLoading;
 
@@ -298,7 +298,18 @@ export const AdminDashboard: React.FC = () => {
         title={t('navigation.dashboard')}
         description={t('admin.dashboardSubtitle')}
         className="mb-8"
-        actions={(
+        actions={canStartInquiry ? (
+          // With projects on, a new inquiry is the primary action and a new
+          // gallery the secondary one (one primary per view).
+          <>
+            <Button variant="outline" leftIcon={<Plus className="w-5 h-5" />} onClick={() => navigate('/admin/events/new')}>
+              {t('events.createEvent')}
+            </Button>
+            <Button variant="primary" leftIcon={<Inbox className="w-5 h-5" />} onClick={() => navigate('/admin/clients/projects/new')}>
+              {t('projects.inquiry.title', 'New inquiry')}
+            </Button>
+          </>
+        ) : (
           <Button
             variant="primary"
             leftIcon={<Plus className="w-5 h-5" />}
@@ -328,6 +339,8 @@ export const AdminDashboard: React.FC = () => {
           </Card>
         ))}
       </div>
+
+      <ProjectsDashboardCard />
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -368,7 +381,7 @@ export const AdminDashboard: React.FC = () => {
                           {t('admin.daysLeft', { count: daysLeft })}
                         </p>
                         <p className="text-xs text-muted">
-                          {t('gallery.expires')} {format(parseISO(event.expires_at!), 'PP')}
+                          {t('gallery.expires')} {formatExpiry(event.expires_at!, 'PP')}
                         </p>
                       </div>
                     </div>
@@ -424,7 +437,7 @@ export const AdminDashboard: React.FC = () => {
                   );
                 })}
               </div>
-              {(awaitingData?.events?.length || 0) > 5 && (
+              {(awaitingData?.pagination?.total ?? awaitingEvents.length) > awaitingEvents.length && (
                 <button
                   onClick={() => navigate('/admin/events?filter=awaiting_delivery')}
                   className="w-full mt-4 text-sm text-accent hover:opacity-80 font-medium"
@@ -445,13 +458,13 @@ export const AdminDashboard: React.FC = () => {
               </div>
               <div className="space-y-3">
                 {pendingApprovals.slice(0, 5).map((a) => {
-                  const prompt = (a.payload as any)?.prompt as string | undefined;
+                  const prompt = approvalPrompt(a);
                   const href = approvalEntityHref(a);
                   const info = (
                     <>
                       <h3 className="font-medium text-heading truncate">{a.workflow_name}</h3>
                       <p className="text-sm text-soft truncate">
-                        {prompt || a.type}{a.entity_type ? ` · ${a.entity_type} #${a.entity_id}` : ''}
+                        {prompt || t('workflows.approvals.defaultPrompt', 'A workflow needs your confirmation.')}{a.entity_type ? ` · ${a.entity_type} #${a.entity_id}` : ''}
                       </p>
                     </>
                   );

@@ -712,7 +712,7 @@ router.post('/flush-queue', adminAuth, requirePermission('email.send'), async (r
 // list only needs the envelope + delivery state. event_id is joined to
 // events so the UI can link back to the source gallery when present.
 router.get('/queue', adminAuth, requirePermission('email.view'), [
-  query('status').optional({ values: 'falsy' }).isIn(['pending', 'sent', 'failed']),
+  query('status').optional({ values: 'falsy' }).isIn(['pending', 'sent', 'failed', 'suppressed']),
   query('emailType').optional({ values: 'falsy' }).isString().isLength({ max: 64 }),
   query('origin').optional({ values: 'falsy' }).isIn(['system', 'manual']),
   query('state').optional({ values: 'falsy' }).isIn(['active', 'archived', 'deleted']),
@@ -879,6 +879,7 @@ router.post('/send', adminAuth, messagingGate, requirePermission('email.send'), 
     if (!subject) return res.status(400).json({ error: 'A subject is required.' });
 
     const sanitizeHtml = require('sanitize-html');
+    const { NON_TEXT_TAGS } = require('../utils/sanitizeHtmlOptions');
     // Match the stricter inbound sanitizeBody allowlist: no <style> tag, no
     // data: scheme — inline style/class attributes are enough for composed mail.
     const html = sanitizeHtml(String(b.html || ''), {
@@ -889,6 +890,7 @@ router.post('/send', adminAuth, messagingGate, requirePermission('email.send'), 
         '*': ['style', 'class'],
       },
       allowedSchemes: ['http', 'https', 'mailto', 'cid'],
+      nonTextTags: NON_TEXT_TAGS,
     });
     const cc = b.cc ? String(b.cc).trim() : null;
     const accountKey = b.accountKey ? String(b.accountKey) : undefined;

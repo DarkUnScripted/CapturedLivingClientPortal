@@ -854,6 +854,16 @@ async function processTemplate(template, variables, language = 'en') {
   // Import date formatter and text formatters
   const { formatDate } = require('../utils/dateFormatter');
   const { formatWelcomeMessage } = require('../utils/formatters');
+  const { getInstanceTimeZone, expiryCalendarDate } = require('../utils/galleryExpiry');
+  // An expiry instant prints as its day in the instance time zone, not the
+  // server's: a gallery open through the end of 24 Dec in New York is 05:00
+  // UTC on the 25th. A bare date, or text that is no timestamp, passes as is.
+  let expiryTimeZone = null;
+  const expiryDay = async (value) => {
+    if (!(value instanceof Date || typeof value === 'number' || /^\d{4}-\d{2}-\d{2}T|^\d{10,}$/.test(String(value)))) return value;
+    expiryTimeZone = expiryTimeZone || await getInstanceTimeZone();
+    return expiryCalendarDate(value, expiryTimeZone) || value;
+  };
 
   // Get translation from email_template_translations table with fallback chain
   let subject = '';
@@ -952,13 +962,13 @@ async function processTemplate(template, variables, language = 'en') {
     processedVariables.event_date = await formatDate(processedVariables.event_date, language);
   }
   if (processedVariables.expiry_date) {
-    processedVariables.expiry_date = await formatDate(processedVariables.expiry_date, language);
+    processedVariables.expiry_date = await formatDate(await expiryDay(processedVariables.expiry_date), language);
   }
   if (processedVariables.archive_date) {
     processedVariables.archive_date = await formatDate(processedVariables.archive_date, language);
   }
   if (processedVariables.expires_at) {
-    processedVariables.expires_at = await formatDate(processedVariables.expires_at, language);
+    processedVariables.expires_at = await formatDate(await expiryDay(processedVariables.expires_at), language);
   }
   // Promised completion date of a two-stage delivery (delivery_due_reminder).
   if (processedVariables.due_date) {
@@ -1523,7 +1533,11 @@ async function processEmailQueueInternal({ ignoreSchedule = false, limit = 10, o
         // this row. Cancelled here, the same way a newsletter opt-out is
         // below — not an error, so it neither counts against retries nor
         // logs at error level.
-        const staleDocumentReason = await staleDocumentNotificationReason(email.email_type, emailData);
+        // The "your download is ready" mail (issue 1733) gets the same
+        // re-check: the archive can be gone by the time the queue is here.
+        const staleDocumentReason = await staleDocumentNotificationReason(email.email_type, emailData)
+          || (email.email_type === 'download_ready'
+            ? await require('./downloadJobNotifier').staleMailReason(emailData, email.recipient_email) : null);
         if (staleDocumentReason) {
           await db('email_queue').where('id', email.id).update({
             status: 'cancelled',
@@ -1638,10 +1652,10 @@ async function processEmailQueueInternal({ ignoreSchedule = false, limit = 10, o
           continue;
         }
         // Increment retry count without rewriting email_data. Protected
-        // account-recovery rows therefore remain encrypted; ordinary rows
-        // retain their variables because a row past the cap can still be
-        // re-queued (Messages "retry" resets retry_count, ignoreSchedule
-        // skips the cap).
+        // account-recovery rows therefore remain encrypted, and so do the
+        // password fields of ordinary rows; those keep their variables
+        // because a row past the cap can still be re-queued (Messages
+        // "retry" resets retry_count, ignoreSchedule skips the cap).
         try {
           await db('email_queue')
             .where('id', email.id)
@@ -1771,6 +1785,9 @@ async function queueEmail(eventId, recipientEmail, emailType, emailData, options
     // An explicit test message (dev tools' send-test-email) must not count as
     // template delivery when the queue processor sends it later.
     if (options.usageEligible === false) emailData.__usageEligible = false;
+    // The document's customer, for the "no administrative emails" decision
+    // (migration 300). Kept on the row so a resend / retry can ask again.
+    if (options.customerAccountId != null) emailData.__customerAccountId = Number(options.customerAccountId);
     const row = {
       event_id: eventId,
       recipient_email: recipientEmail,
@@ -1786,6 +1803,19 @@ async function queueEmail(eventId, recipientEmail, emailType, emailData, options
       // (issue 1670). NULL is what the processor's whereNull() looks for.
       scheduled_at: null,
     };
+    // Customer opted out of administrative mail (migration 300): keep the row
+    // in the email log as `suppressed` so the admin can see what was held
+    // back, but never hand it to the processor (it only picks up pending).
+    // Decided here, once, for the document's customer: the caller's Issue
+    // button and the late fee read the same customer flag. Returns
+    // 'suppressed' (truthy, so `if (queued)` callers carry on) for callers
+    // that report what happened.
+    if (await require('./_adminEmailOptOut').isSuppressedForRecipient(recipientEmail, emailType, options.customerAccountId)) {
+      row.status = 'suppressed';
+      await db('email_queue').insert(row);
+      logger.info(`Email suppressed: ${emailType} (customer opted out of administrative emails)`);
+      return 'suppressed';
+    }
     let snappedFrom = null;
     // Base time to schedule from:
     //   - explicit options.scheduledAt (CRM split-payment invoices), OR
@@ -1810,7 +1840,9 @@ async function queueEmail(eventId, recipientEmail, emailType, emailData, options
       // time forward (inside hours → stays null → processor sends at once).
       if (options.scheduledAt || snappedFrom) row.scheduled_at = snapped;
     }
-    await db('email_queue').insert(row);
+    // options.trx: the caller's transaction, when the row must commit or roll
+    // back together with its own write (downloadJobNotifier's claim).
+    await (options.trx || db)('email_queue').insert(row);
 
     logger.info(`Email queued: ${emailType} to ${recipientEmail}${
       row.scheduled_at ? ` (scheduled ${row.scheduled_at.toISOString()}${

@@ -1,20 +1,19 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ClipboardList, Package } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { GalleryEmptyMessage } from './GalleryEmptyMessage';
 import { toast as toastify } from 'react-toastify';
 import { useTranslation } from 'react-i18next';
 
 import type { Photo, DownloadResolutionChoice, GalleryPerson } from '../../types';
 import { useDownloadPhoto } from '../../hooks/useGallery';
+import { isPhotoDownloadPending } from '../../hooks/usePhotoDownloadPending';
 import { PhotoLightbox } from './PhotoLightbox';
 import { DownloadResolutionModal } from './DownloadResolutionModal';
-import { Button } from '../common';
 import { galleryService } from '../../services/gallery.service';
 import { analyticsService } from '../../services/analytics.service';
-import { hasVideoItems, selectLabel } from '../../utils/mediaCounts';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useDownloadQuota } from '../../contexts/DownloadQuotaContext';
-import { isDownloadLimitError, showDownloadLimitReached } from '../../utils/downloadLimit';
-import { DownloadQuotaNotice } from './DownloadQuotaNotice';
+import { useDownloadChoice } from '../../contexts/DownloadChoiceContext';
+import { isDownloadLimitError, isSelectionTooLargeError, showDownloadLimitReached, type QuotaPhoto } from '../../utils/downloadLimit';
 import type { LightboxPhotoChangeHandler } from './photoLink';
 
 // Import all layouts
@@ -41,7 +40,6 @@ interface PhotoGridWithLayoutsProps {
   selectedPhotos?: Set<number>;
   onSelectionChange?: (photos: Set<number>) => void;
   onToggleSelectionMode?: () => void;
-  showSelectionControls?: boolean;
   eventName?: string;
   eventLogo?: string | null;
   eventDate?: string | null;
@@ -79,6 +77,8 @@ interface PhotoGridWithLayoutsProps {
   welcomeMessage?: string;
   // Logout callback for full-page layouts
   onLogout?: () => void;
+  // Guest upload for full-page layouts (they have no gallery header)
+  onUploadClick?: () => void;
   // Client visibility controls (#172)
   isClient?: boolean;
   onToggleVisibility?: (photoId: number, currentVisibility: string) => void;
@@ -98,29 +98,45 @@ interface PhotoGridWithLayoutsProps {
    * the whole gallery shell.
    */
   suppressEmptyState?: boolean;
+  /** The scope has photos, but the search or filters leave none on screen. */
+  emptyIsFiltered?: boolean;
   /** #1160: event-wide count + whole-gallery download for layout chrome. */
   eventPhotoCount?: number;
   onDownloadEverything?: () => void;
   // Copyable filename list (issue 1733, A3d): the selection, or the viewer's
-  // favourites when nothing is selected. Hidden at zero.
+  // favourites when nothing is selected. Hidden at zero. The full-page
+  // layouts render the button; the others get it from the gallery toolbar.
   onCopyFilenames?: () => void;
   copyFilenamesCount?: number;
+  /** Premium / Story nav heart — see BaseGalleryLayoutProps. */
+  likedOnly?: boolean;
+  onToggleLikedOnly?: () => void;
   /** Link to a single photo (issue 1733) — see BaseGalleryLayoutProps. */
   openPhotoId?: number | null;
   /** After the photos, before a full-page layout's footer (issue 1562). */
   afterGrid?: React.ReactNode;
   onLightboxPhotoChange?: LightboxPhotoChangeHandler;
+  /**
+   * The container's event-wide id lookup, so the download limit prices the
+   * whole selection: a search or filter applied after selecting hides
+   * photos, it does not unselect them, and they are still downloaded.
+   */
+  photosForIds?: (ids: number[]) => QuotaPhoto[];
 }
 
 export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
   photos,
   suppressEmptyState = false,
+  emptyIsFiltered = false,
   eventPhotoCount,
   onDownloadEverything,
   onCopyFilenames,
   copyFilenamesCount = 0,
+  likedOnly = false,
+  onToggleLikedOnly,
   openPhotoId,
   onLightboxPhotoChange,
+  photosForIds,
   afterGrid,
   slug,
   categoryId,
@@ -140,7 +156,6 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
   enableDevtoolsProtection = false,
   onSelectionChange,
   onToggleSelectionMode: parentToggleSelectionMode,
-  showSelectionControls = true,
   eventName,
   eventLogo,
   eventDate,
@@ -153,6 +168,7 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
   heroImageAnchor = 'center',
   welcomeMessage,
   onLogout,
+  onUploadClick,
   isClient = false,
   onToggleVisibility,
   showOriginalFilename = false,
@@ -204,14 +220,37 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
   // Gallery Premium and Gallery Story mount their own lightbox and report
   // its moves through this wrapper, so the id it is on is known here too.
   const layoutOwnsLightbox = theme.galleryLayout === 'gallery-premium' || theme.galleryLayout === 'gallery-story';
+  // Premium and Story render their own empty state; the key remounts them
+  // when the list empties or fills, so their own lightbox state goes with it
+  // as it did when this component returned its empty message instead.
+  const layoutKey = layoutOwnsLightbox && photos.length === 0 ? 'empty' : 'photos';
+  // The remount drops whatever had focus in the old layout: the empty
+  // state's upload button once the first upload's refetch fills the gallery.
+  // A control marked `data-gallery-focus="<role>"` hands focus to the new
+  // layout's control with the same role rather than to <body>. Read during
+  // render, while the old layout (and the focused control) is still in the
+  // document.
+  const renderedLayoutKeyRef = useRef(layoutKey);
+  const refocusRoleRef = useRef<string | null>(null);
+  if (renderedLayoutKeyRef.current !== layoutKey) {
+    renderedLayoutKeyRef.current = layoutKey;
+    refocusRoleRef.current = (document.activeElement as HTMLElement | null)
+      ?.closest?.('[data-gallery-focus]')?.getAttribute('data-gallery-focus') ?? null;
+  }
+  useEffect(() => {
+    const role = refocusRoleRef.current;
+    if (!role) return;
+    refocusRoleRef.current = null;
+    document.querySelector<HTMLElement>(`[data-gallery-focus="${role}"]`)?.focus();
+  }, [layoutKey]);
   const reportLayoutLightbox: LightboxPhotoChangeHandler = (photoId, reason) => {
     lightboxPhotoIdRef.current = reason === 'close' ? null : photoId;
     onLightboxPhotoChange?.(photoId, reason);
   };
 
   // The list emptied under an open lightbox (unliking the last Liked photo,
-  // a filter change): this component returns its empty state and the
-  // lightbox — its own or the layout's — unmounts without a close, leaving
+  // a filter change): this component returns its empty state, or remounts
+  // a full-page layout into its own, and the lightbox unmounts without a close, leaving
   // `?photo=` and the pushed history entry behind. Report the close here.
   // Only the EMPTY list: while photos remain, the lightbox clamps onto a
   // neighbour in an effect of its own and reports that step a render later;
@@ -268,27 +307,43 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
 
   // Download limit (issue 1560).
   const downloadQuota = useDownloadQuota();
+  const downloadChoice = useDownloadChoice();
+  // Priced by id, not by what is on screen: the selection can hold photos a
+  // search hides, and the download sends them all. Without the container's
+  // lookup, an id this list lacks counts as a new download.
+  const quotaPhotosFor = useCallback((ids: number[]): QuotaPhoto[] => {
+    if (photosForIds) return photosForIds(ids);
+    const byId = new Map(photos.map((photo) => [photo.id, photo]));
+    return ids.map((id) => byId.get(id) ?? { id });
+  }, [photos, photosForIds]);
   const selectedPhotoList = useMemo(
-    () => photos.filter((photo) => selectedPhotos.has(photo.id)),
-    [photos, selectedPhotos]
+    () => quotaPhotosFor(Array.from(selectedPhotos)),
+    [quotaPhotosFor, selectedPhotos]
   );
 
   const handleDownload = (photo: Photo, e: React.MouseEvent) => {
     e.stopPropagation();
+    // Issue 2043: a repeated tap while this photo is still being prepared.
+    if (isPhotoDownloadPending(photo.id)) return;
     // Download limit (issue 1560): say why instead of sending a request the
     // server is bound to refuse.
     if (!downloadQuota.canDownload(photo)) {
       showDownloadLimitReached({ remaining: 0 });
       return;
     }
-    
-    // Track individual photo download
-    analyticsService.trackDownload(photo.id, slug, false);
-    
-    downloadPhotoMutation.mutate({
-      slug,
-      photoId: photo.id,
-      filename: photo.filename,
+
+    // The download menu (issue 1733, E2) asks for a size first where the
+    // gallery offers one.
+    downloadChoice.choose(photo, (resolution) => {
+      // Track individual photo download
+      analyticsService.trackDownload(photo.id, slug, false);
+
+      downloadPhotoMutation.mutate({
+        slug,
+        photoId: photo.id,
+        filename: photo.filename,
+        resolution,
+      });
     });
   };
 
@@ -330,44 +385,38 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
 
     toastify.info(t('gallery.downloading', { count: ids.length }));
 
+    // Over the server's per-download cap the selection stays too, to trim.
+    let keepSelection = false;
     try {
       await galleryService.downloadSelectedPhotos(slug, ids);
       analyticsService.trackGalleryEvent('bulk_download', { gallery: slug, photo_count: ids.length });
     } catch (error) {
+      // A download-limit refusal keeps the selection, as the pre-check
+      // above does, so the guest can trim it to what is left; so does a
+      // selection over the server's per-download cap.
+      keepSelection = isDownloadLimitError(error) || isSelectionTooLargeError(error);
       if (!isDownloadLimitError(error)) toastify.error(t('gallery.downloadError'));
     } finally {
-      setSelectedPhotos(new Set());
-      if (parentToggleSelectionMode) {
-        parentToggleSelectionMode();
-      } else {
-        setLocalSelectionMode(false);
+      if (!keepSelection) {
+        setSelectedPhotos(new Set());
+        if (parentToggleSelectionMode) {
+          parentToggleSelectionMode();
+        } else {
+          setLocalSelectionMode(false);
+        }
       }
     }
   };
 
-  if (photos.length === 0) {
+  // Premium and Story render their own empty state (with the upload button
+  // and their way back from a filter), so only the other layouts stop here.
+  if (photos.length === 0 && !layoutOwnsLightbox) {
     // Suppressed (#1160): a folder-only root has folder tiles above proving the
     // gallery isn't empty, so the message would contradict them.
     if (!suppressEmptyState) {
       return (
         <div className="text-center py-12">
-          <p className="text-muted-theme">{t('gallery.noPhotosFound')}</p>
-          {/* The filename list is event-wide (issue 1733, A3d): a search or
-              feedback filter that leaves no photo on screen must not take the
-              favourites' list with it. */}
-          {onCopyFilenames && copyFilenamesCount > 0 && (
-            <div className="mt-4 flex justify-center">
-              <Button
-                variant="outline"
-                size="sm"
-                leftIcon={<ClipboardList className="w-4 h-4" />}
-                onClick={onCopyFilenames}
-                className="text-xs sm:text-sm"
-              >
-                {t('gallery.copyFilenames.button', 'Copy filenames')} ({copyFilenamesCount})
-              </Button>
-            </div>
-          )}
+          <GalleryEmptyMessage filtered={emptyIsFiltered} />
         </div>
       );
     }
@@ -383,10 +432,13 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
     // noPhotosFound return, don't contradict the folder tiles above them on a
     // folder-only root (#1160).
     suppressEmptyState,
+    emptyIsFiltered,
     eventPhotoCount,
     onDownloadEverything,
     onCopyFilenames,
     copyFilenamesCount,
+    likedOnly,
+    onToggleLikedOnly,
     afterGrid,
     slug,
     // Face data (#1074) must reach the full-page layouts too — they render
@@ -412,6 +464,9 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
     // Issue 1709: the Story layout reads its grid mode from the theme's
     // gallerySettings, defaulting to the original fixed tiles.
     storyGridMode: theme.gallerySettings?.storyGridMode,
+    storyShowFilenames: theme.gallerySettings?.storyShowFilenames === true,
+    storyFooterTitle: theme.gallerySettings?.storyFooterTitle,
+    storyFooterText: theme.gallerySettings?.storyFooterText,
     selectedPhotos,
     allowDownloads,
     protectionLevel,
@@ -426,6 +481,7 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
     onToggleSelectionMode: toggleSelectionMode,
     onSelectMany: selectMany,
     onDownloadSelected: handleDownloadSelected,
+    selectionQuotaPhotos: selectedPhotoList,
     eventName,
     eventLogo,
     eventDate,
@@ -437,6 +493,7 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
     heroLogoPosition,
     welcomeMessage,
     onLogout,
+    onUploadClick,
     isClient,
     onToggleVisibility,
     showOriginalFilename,
@@ -473,20 +530,6 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
   // Gallery Premium and Gallery Story layouts have their own integrated hero/header
   const isFullPageLayout = galleryLayout === 'gallery-premium' || galleryLayout === 'gallery-story';
 
-  // Filename list (issue 1733, A3d). Outside selection mode it lists the
-  // viewer's favourites, inside it the selection — the count says which.
-  const copyFilenamesButton = onCopyFilenames && copyFilenamesCount > 0 ? (
-    <Button
-      variant="outline"
-      size="sm"
-      leftIcon={<ClipboardList className="w-4 h-4" />}
-      onClick={onCopyFilenames}
-      className="text-xs sm:text-sm"
-    >
-      {t('gallery.copyFilenames.button', 'Copy filenames')} ({copyFilenamesCount})
-    </Button>
-  ) : null;
-
   return (
     <>
       {/* Hero Header - shown when headerStyle is 'hero' (skip for full-page layouts with integrated hero) */}
@@ -516,80 +559,8 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
         </div>
       )}
 
-      {/* The filename list is still reachable where the selection toolbar is
-          not (a carousel, or a single visible photo): the favourites that
-          feed it do not depend on either. Full-page layouts get the button
-          from GalleryView's own band. */}
-      {showSelectionControls && !isFullPageLayout && !(photos.length > 1 && galleryLayout !== 'carousel') && copyFilenamesButton && (
-        <div className="mb-4 flex items-center gap-2">{copyFilenamesButton}</div>
-      )}
-
-      {/* Selection Mode Controls - Not shown for carousel, full-page layouts, or when controls are hidden */}
-      {showSelectionControls && photos.length > 1 && galleryLayout !== 'carousel' && !isFullPageLayout && (
-        <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={toggleSelectionMode}
-              title={t('gallery.selectPhotosHint')}
-              className="text-xs sm:text-sm"
-            >
-              {isSelectionMode ? t('gallery.cancelSelection') : selectLabel(t, hasVideoItems(photos))}
-            </Button>
-            {!isSelectionMode && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  toggleSelectionMode();
-                  selectAll();
-                }}
-                className="text-xs sm:text-sm"
-              >
-                {t('gallery.selectAll')}
-              </Button>
-            )}
-            {!isSelectionMode && copyFilenamesButton}
-          </div>
-          
-          {isSelectionMode && (
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
-              <span className="text-xs sm:text-sm text-muted-theme">
-                {t('gallery.photosSelected', { count: selectedPhotos.size })}
-              </span>
-              <div className="flex items-center gap-2 flex-wrap">
-                <Button variant="ghost" size="sm" onClick={selectAll} className="text-xs sm:text-sm">
-                  {t('gallery.selectAll')}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={deselectAll} className="text-xs sm:text-sm">
-                  {t('gallery.deselectAll')}
-                </Button>
-                {selectedPhotos.size > 0 && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    leftIcon={<Package className="w-4 h-4" />}
-                    onClick={handleDownloadSelected}
-                    disabled={!downloadQuota.allows(selectedPhotoList)}
-                    className="text-xs sm:text-sm"
-                  >
-                    <span className="hidden sm:inline">{t('gallery.downloadSelected', { count: selectedPhotos.size })}</span>
-                    <span className="sm:hidden">{t('common.download')} ({selectedPhotos.size})</span>
-                  </Button>
-                )}
-                {copyFilenamesButton}
-              </div>
-              {allowDownloads && selectedPhotos.size > 0 && (
-                <DownloadQuotaNotice photos={selectedPhotoList} className="text-xs sm:text-sm" />
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Render the selected layout */}
-      <LayoutComponent {...layoutProps} />
+      {/* Render the selected layout, keyed by `layoutKey` (see above). */}
+      <LayoutComponent key={layoutKey} {...layoutProps} />
       {/* Full-page layouts place it themselves, ahead of their footer. */}
       {!isFullPageLayout && afterGrid}
 
@@ -623,10 +594,16 @@ export const PhotoGridWithLayouts: React.FC<PhotoGridWithLayoutsProps> = ({
           choices={downloadChoices}
           standardResolution={downloadStandard}
           photoIds={resolutionPickerIds}
-          quotaPhotos={photos.filter((photo) => resolutionPickerIds.includes(photo.id))}
-          onClose={() => {
-            setResolutionPickerIds(null);
+          quotaPhotos={quotaPhotosFor(resolutionPickerIds)}
+          onClose={() => setResolutionPickerIds(null)}
+          // Only a download handed over ends the selection. Cancelling, a
+          // failed build or a download-limit refusal keeps it to retry or
+          // trim, as the direct download path does.
+          onDownloaded={() => {
             setSelectedPhotos(new Set());
+            // A layout's Download All opens the picker outside selection
+            // mode too; the parent's toggle would switch it on.
+            if (!isSelectionMode) return;
             if (parentToggleSelectionMode) {
               parentToggleSelectionMode();
             } else {

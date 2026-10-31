@@ -89,10 +89,14 @@ interface UpdateEventData {
   allow_user_uploads?: boolean;
   guest_name_mode?: GuestNameMode;
   show_credits_to_guests?: boolean;
+  live_refresh?: boolean;
+  show_exif_to_guests?: boolean;
+  neutral_photo_labels?: boolean;
   // Reveal mode (#838)
   reveal_mode?: boolean;
   reveal_at?: string | null;
   upload_category_id?: number | null;
+  guest_upload_max_edge?: number | null;
   hero_photo_id?: number | null;
   source_mode?: 'managed' | 'reference';
   external_path?: string | null;
@@ -109,6 +113,8 @@ interface UpdateEventData {
   // untouched, send [] to clear.
   assigned_admin_ids?: number[];
   review_contributor_uploads?: boolean;
+  // Hold guest uploads until they are approved (issue 1733).
+  moderate_guest_uploads?: boolean;
 }
 
 /** Two-stage delivery state of one gallery (issue 1562). */
@@ -124,6 +130,8 @@ export interface DeliveryState {
   first_look_count: number;
   /** First-look photos whose original filename arrived again in the full set. */
   duplicate_count: number;
+  /** The duplicates among delivered_count: held or rejected first-look uploads are not in it. */
+  delivered_duplicate_count: number;
 }
 
 export interface CompleteDeliveryResult {
@@ -168,7 +176,9 @@ export type EventSortBy =
   | 'expires_at'
   | 'slug'
   | 'photo_count'
-  | 'status';
+  | 'status'
+  // Two-stage delivery (issue 1562): the dashboard's awaiting-delivery card.
+  | 'delivery_due_at';
 
 interface EventsListResponse {
   events: Event[];

@@ -7,16 +7,22 @@ import React from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
-import { FolderOpen, FolderTree, RefreshCw } from 'lucide-react';
+import { FileX, FolderOpen, FolderTree, RefreshCw } from 'lucide-react';
 import type { Event } from '../../../types';
 import { Button, useConfirm, Badge } from '../../../components/common';
-import { invalidateFolderViews } from '../../../components/admin/folders/folderQueries';
+import { folderErrorMessage, invalidateFolderViews } from '../../../components/admin/folders/folderQueries';
 import { foldersService } from '../../../services/folders.service';
 import { usePermission } from '../../../hooks/usePermission';
 import { useExternalImport } from './useExternalImport';
 import { toBoolean } from '../../../utils/parsers';
 
-export const ExternalSourceBar: React.FC<{ event: Event; onChangeFolder: () => void }> = ({ event, onChangeFolder }) => {
+export const ExternalSourceBar: React.FC<{
+  event: Event;
+  onChangeFolder: () => void;
+  /** The grid shows only the photos whose file is gone (issue 2121). */
+  missingFilter?: boolean;
+  onToggleMissing?: () => void;
+}> = ({ event, onChangeFolder, missingFilter = false, onToggleMissing }) => {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const canChangeFolder = usePermission('events.edit') && !event.is_archived;
@@ -35,11 +41,13 @@ export const ExternalSourceBar: React.FC<{ event: Event; onChangeFolder: () => v
       toast.success(result.moved > 0
         ? t('events.externalSource.structureApplied', '{{count}} photos moved into folders', { count: result.moved })
         : t('events.externalSource.structureNothing', 'Every photo from a subfolder is in a folder already'));
+      if (result.limited) {
+        toast.warning(t('events.externalSource.structureLimited', 'The gallery reached its folder limit: some photos went into the closest existing folder.'));
+      }
       invalidateFolderViews(queryClient, event.id);
     },
     onError: (error: unknown) => {
-      const e = error as { response?: { data?: { error?: string } } };
-      toast.error(e.response?.data?.error || t('events.externalSource.structureFailed', 'The folder structure could not be applied'));
+      toast.error(folderErrorMessage(error, t) || t('events.externalSource.structureFailed', 'The folder structure could not be applied'));
     },
   });
 
@@ -77,6 +85,18 @@ export const ExternalSourceBar: React.FC<{ event: Event; onChangeFolder: () => v
         </span>
       )}
       <div className="ml-auto flex flex-wrap items-center gap-2">
+        {onToggleMissing && (imp.missingFiles > 0 || missingFilter) && (
+          <Button
+            variant={missingFilter ? 'secondary' : 'outline'}
+            size="sm"
+            leftIcon={<FileX className="w-4 h-4" />}
+            onClick={onToggleMissing}
+            aria-pressed={missingFilter}
+            title={t('events.externalSource.missingFilesHint', 'Show the photos whose file is gone from the folder')}
+          >
+            {t('events.externalSource.missingFiles', '{{count}} files missing', { count: imp.missingFiles })}
+          </Button>
+        )}
         {imp.canImport && (
           <Button
             variant="outline"

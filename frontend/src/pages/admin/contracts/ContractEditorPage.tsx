@@ -20,6 +20,7 @@ import { toast } from 'react-toastify';
 import { Button, Card, Input, Loading, LocalizedDateInput, TimeField } from '../../../components/common';
 import { DocumentHeader } from '../../../components/admin/DocumentHeader';
 import { SettingsSaveBar } from '../../../components/admin/SettingsSaveBar';
+import { useLeaveGuard } from '../../../contexts/UnsavedChangesContext';
 import {
   contractsService,
   type ContractBlockSection,
@@ -32,6 +33,8 @@ import { describeSaveError, newIdempotencyKey, type SaveErrorView } from './cont
 import { contractTemplatesService } from '../../../services/contractTemplates.service';
 import { AttachmentListEditor, type AttachmentRow } from '../../../components/admin/AttachmentListEditor';
 import { SignersEditorCard } from './SignersEditorCard';
+import { todayIsoDate } from '../../../utils/localDate';
+import { useProjectPrefill } from '../projects/useProjectPrefill';
 
 const CRM_DISCLAIMER_URL = 'https://docs.picpeak.app/features/crm/disclaimers';
 
@@ -94,7 +97,7 @@ export const ContractForm = forwardRef<ContractFormHandle, ContractFormProps>(({
   const [introText, setIntroText] = useState('');
   const [outroText, setOutroText] = useState('');
   const [language, setLanguage] = useState('de');
-  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [issueDate, setIssueDate] = useState(todayIsoDate);
   const [validUntil, setValidUntil] = useState('');
   const [projectId, setProjectId] = useState<number | null>(null);
   const [blocks, setBlocks] = useState<BlockRow[]>([]);
@@ -177,6 +180,17 @@ export const ContractForm = forwardRef<ContractFormHandle, ContractFormProps>(({
     })();
     return () => { cancelled = true; };
   }, [isEdit, searchParams, customerAccountId]);
+
+  // Opened from a project (`?projectId=`): the contract joins the project and
+  // starts from its name and date. The customer comes through the effect above.
+  // The link itself is taken from the URL at once (see QuoteEditorPage).
+  const prefillProjectId = useProjectPrefill((project) => {
+    setEventName((prev) => prev || project.name);
+    setEventDate((prev) => prev || project.eventDate || '');
+  }, { enabled: !isEdit, onError: (failedId) => setProjectId((prev) => (prev === failedId ? null : prev)) });
+  useEffect(() => {
+    if (prefillProjectId) setProjectId((prev) => prev ?? prefillProjectId);
+  }, [prefillProjectId]);
 
   // Load existing contract on edit.
   const { data: existing, isLoading: existingLoading } = useQuery({
@@ -1027,6 +1041,7 @@ ContractForm.displayName = 'ContractForm';
 export const ContractEditorPage: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { unguarded } = useLeaveGuard();
   const formRef = useRef<ContractFormHandle>(null);
   const [state, setState] = useState<ContractFormState>({ dirty: true, busy: false, valid: false });
   const [createdId, setCreatedId] = useState<number | null>(null);
@@ -1039,7 +1054,7 @@ export const ContractEditorPage: React.FC = () => {
       <DocumentHeader
         title={t('contracts.editor.titleNew', 'New contract')}
         actions={(
-          <Button variant="ghost" onClick={() => navigate('/admin/clients/contracts')} disabled={state.busy}>
+          <Button variant="ghost" onClick={() => unguarded(() => navigate('/admin/clients/contracts'))} disabled={state.busy}>
             {t('common.cancel', 'Cancel')}
           </Button>
         )}

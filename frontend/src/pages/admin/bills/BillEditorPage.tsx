@@ -16,6 +16,7 @@ import { Eye } from 'lucide-react';
 import { Button, Card, Loading, Input, LocalizedDateInput, TimeField } from '../../../components/common';
 import { DocumentHeader } from '../../../components/admin/DocumentHeader';
 import { SettingsSaveBar } from '../../../components/admin/SettingsSaveBar';
+import { useLeaveGuard } from '../../../contexts/UnsavedChangesContext';
 import { billsService, type InvoiceCreatePayload, type InvoiceQrFormat } from '../../../services/bills.service';
 import { quotesService } from '../../../services/quotes.service';
 import { contractsService } from '../../../services/contracts.service';
@@ -34,6 +35,8 @@ import { userManagementService } from '../../../services/userManagement.service'
 import { settingsService } from '../../../services/settings.service';
 import { useAdminAuth } from '../../../contexts/AdminAuthContext';
 import { toast } from 'react-toastify';
+import { todayIsoDate } from '../../../utils/localDate';
+import { useProjectPrefill } from '../projects/useProjectPrefill';
 
 function toMinor(amount: number) {
   return Math.round((Number(amount) || 0) * 100);
@@ -80,7 +83,7 @@ export const BillForm = forwardRef<BillFormHandle, BillFormProps>(({ invoiceId, 
   const [customerIsPassive, setCustomerIsPassive] = useState(false);
   // Customer search + inline-create state moved into <CustomerPicker> (C.5).
   const [currency, setCurrency] = useState('CHF');
-  const [issueDate, setIssueDate] = useState(new Date().toISOString().slice(0, 10));
+  const [issueDate, setIssueDate] = useState(todayIsoDate());
   const [dueDate, setDueDate] = useState('');
   // Due date is normally view-only: it auto-tracks (send date else issue
   // date) + the selected Net-days template, so the payment clock starts
@@ -123,6 +126,8 @@ export const BillForm = forwardRef<BillFormHandle, BillFormProps>(({ invoiceId, 
   // an actual events row, and it carries through to the customer
   // portal + tax report + email templates.
   const [eventId, setEventId] = useState<number | null>(null);
+  // Created from a project's "Create invoice" (`?projectId=`). Create only.
+  const [projectId, setProjectId] = useState<number | null>(null);
   const [eventName, setEventName] = useState('');
   const [eventDate, setEventDate] = useState('');
   const [eventTimeStart, setEventTimeStart] = useState('');
@@ -295,6 +300,18 @@ export const BillForm = forwardRef<BillFormHandle, BillFormProps>(({ invoiceId, 
     if (ed) setEventDate((prev) => prev || ed);
   }, [isEdit, searchParams]);
 
+  // The project link itself; the customer and gallery come through the
+  // query string above, the date from the project when no gallery has one.
+  // The link is taken from the URL at once, so an invoice saved before the
+  // project has loaded still joins it, and dropped if the project cannot load.
+  const prefillProjectId = useProjectPrefill((project) => {
+    setEventName((prev) => prev || project.name);
+    setEventDate((prev) => prev || project.eventDate || '');
+  }, { enabled: !isEdit, onError: (failedId) => setProjectId((prev) => (prev === failedId ? null : prev)) });
+  useEffect(() => {
+    if (prefillProjectId) setProjectId((prev) => prev ?? prefillProjectId);
+  }, [prefillProjectId]);
+
   // Pre-fill from a fully-signed contract when the editor is opened
   // via `?fromContractId=<id>` (the "New invoice" link on
   // ContractDetailPage's header, used after the contract has been
@@ -462,6 +479,7 @@ export const BillForm = forwardRef<BillFormHandle, BillFormProps>(({ invoiceId, 
     // and the PUT handler kept the old value. The route's
     // `optional({ values: 'falsy' })` lets null through unvalidated.
     eventId: eventId ?? undefined,
+    projectId: !isEdit && projectId ? projectId : undefined,
     eventName: eventName || null,
     eventDate: eventDate || null,
     eventTimeStart: eventTimeStart || null,
@@ -834,6 +852,7 @@ BillForm.displayName = 'BillForm';
 export const BillEditorPage: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { unguarded } = useLeaveGuard();
   const formRef = useRef<BillFormHandle>(null);
   const [state, setState] = useState<BillFormState>({ dirty: true, busy: false, valid: true, spawnCount: 0 });
   const [createdId, setCreatedId] = useState<number | null>(null);
@@ -855,7 +874,7 @@ export const BillEditorPage: React.FC = () => {
             <Button variant="outline" onClick={() => formRef.current?.previewUnsaved()} disabled={state.busy} leftIcon={<Eye className="w-4 h-4" />}>
               {t('common.preview', 'Preview')}
             </Button>
-            <Button variant="ghost" onClick={() => navigate('/admin/clients/bills')} disabled={state.busy}>
+            <Button variant="ghost" onClick={() => unguarded(() => navigate('/admin/clients/bills'))} disabled={state.busy}>
               {t('common.cancel', 'Cancel')}
             </Button>
           </>

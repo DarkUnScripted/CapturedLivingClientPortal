@@ -18,6 +18,7 @@ const {
   isEncryptedEmailData,
   isProtectedEmailType,
   PROTECTED_PENDING_STATUS,
+  whatsappSealType,
 } = require('../utils/emailQueueEncryption');
 
 const TOKEN_TABLES = [
@@ -129,6 +130,12 @@ async function rotateLegacyAdminReset(knex, row, data, hasRenderedHtml) {
   if (await knex.schema.hasTable('api_tokens')) {
     await knex('api_tokens').where({ created_by: admin.id }).whereNull('revoked_at')
       .update({ revoked_at: now });
+  }
+  // Passkeys go with a reset (see adminPasswordReset.js). Inline rather than
+  // through passkeyService: this also runs inside migration 273, before the
+  // table exists and without the app's own connection.
+  if (await knex.schema.hasTable('admin_webauthn_credentials')) {
+    await knex('admin_webauthn_credentials').where({ admin_user_id: admin.id }).del();
   }
   // The queued address may have changed since this temporary password was
   // issued. Bind and deliver the replacement only to the account's current
@@ -251,6 +258,50 @@ async function hardenAccountRecoveryStorage(knex) {
     }
   }
   await hardenQueueRows(knex);
+}
+
+/**
+ * Gallery passwords and client PINs in the mail and WhatsApp queues (the
+ * gallery_created mail, its password-reset copy, the WhatsApp gallery
+ * notice). A row that is still waiting or can still be retried or resent
+ * keeps them sealed (emailQueueEncryption), so it still sends; a final row
+ * keeps only the archive mask. Account-recovery rows are hardenQueueRows'.
+ */
+async function protectQueuedPasswords(knex) {
+  if (await knex.schema.hasTable('email_queue')) {
+    const hasRenderedHtml = await knex.schema.hasColumn('email_queue', 'rendered_html');
+    const columns = ['id', 'recipient_email', 'email_type', 'email_data', 'status'];
+    if (hasRenderedHtml) columns.push('rendered_html');
+    const rows = await knex('email_queue').select(columns);
+    for (const row of rows) {
+      if (isProtectedEmailType(row.email_type)) continue;
+      const data = parseEmailData(row.email_data);
+      const secrets = secretValues(data);
+      if (!secrets.length) continue;
+      // A sent mail is final; any other row can still be sent (retry, send
+      // now, resend), so it needs the value, sealed.
+      const update = {
+        email_data: JSON.stringify(row.status === 'sent'
+          ? redactEmailData(data) : encryptEmailData(row.email_type, data, row.recipient_email)),
+      };
+      if (hasRenderedHtml && row.rendered_html) update.rendered_html = redactRenderedHtml(row.rendered_html, secrets);
+      await knex('email_queue').where({ id: row.id, status: row.status }).update(update);
+    }
+  }
+  if (await knex.schema.hasTable('whatsapp_queue')) {
+    const rows = await knex('whatsapp_queue')
+      .select('id', 'recipient_phone', 'message_type', 'message_data', 'status');
+    for (const row of rows) {
+      const data = parseEmailData(row.message_data);
+      if (!secretValues(data).length) continue;
+      // Only a pending WhatsApp is ever sent; nothing re-queues a final one.
+      const messageData = row.status === 'pending'
+        ? encryptEmailData(whatsappSealType(row.message_type), data, row.recipient_phone)
+        : redactEmailData(data);
+      await knex('whatsapp_queue').where({ id: row.id, status: row.status })
+        .update({ message_data: JSON.stringify(messageData) });
+    }
+  }
 }
 
 async function removeAccountRecoveryWriteGuards(knex) {
@@ -388,5 +439,6 @@ module.exports = {
   ensureAccountRecoveryDigestColumns,
   hardenAccountRecoveryStorage,
   installAccountRecoveryWriteGuards,
+  protectQueuedPasswords,
   removeAccountRecoveryWriteGuards,
 };

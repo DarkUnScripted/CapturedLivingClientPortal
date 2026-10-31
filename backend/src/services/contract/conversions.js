@@ -89,6 +89,10 @@ async function createFromQuote(quoteId, adminId, { contractTemplateId = null } =
   const hasContractSourceQuote = await hasColumnCached('contracts', 'source_quote_id');
   const hasQuoteContractBackPointer = await hasColumnCached('quotes', 'converted_contract_id');
   const hasContractEventCols = await hasColumnCached('contracts', 'event_name');
+  // The contract stays in the quote's project (migration 121), so the project
+  // page shows it without a second link, when the converter owns that project.
+  const carriedProject = await hasColumnCached('contracts', 'project_id')
+    ? await require('../projectService').carriedProjectId(quote.project_id, adminId) : null;
 
   // Resolve the actor BEFORE opening the transaction — adminActor reads
   // admin_users via the global db, which deadlocks the single-connection
@@ -116,6 +120,7 @@ async function createFromQuote(quoteId, adminId, { contractTemplateId = null } =
       updated_at: new Date(),
     };
     if (hasContractSourceQuote) contractRow.source_quote_id = quote.id;
+    if (carriedProject) contractRow.project_id = carriedProject;
     // Migration 140 — contract from quote inherits the quote's
     // deal_uuid so both documents belong to the same deal chain.
     // Falls back to a fresh UUID only if the source quote predates the
@@ -193,7 +198,9 @@ async function convertToEvent(contractId, adminId) {
   // the event row.
   if (contract.source_quote_id) {
     const quoteService = require('../quoteService');
-    const result = await quoteService.convertToEvent(contract.source_quote_id, adminId, { fromContract: true });
+    const result = await quoteService.convertToEvent(contract.source_quote_id, adminId, {
+      fromContract: true, projectId: contract.project_id || null,
+    });  // quoteService vets the project for adminId (carriedProjectId)
     if (hasContractConvertedEvent) {
       await auditedUpdate(db, 'contracts', { id: contractId }, {
         converted_event_id: result.eventId,
@@ -237,7 +244,10 @@ async function convertToEvent(contractId, adminId) {
   const eventCols = await db('events').columnInfo();
   const { getImageSecurityDefaults, resolveImageSecurityColumns } = require('../../routes/adminEvents/helpers');
   const imageSecurityColumns = resolveImageSecurityColumns({}, await getImageSecurityDefaults());
-  const slug = `contract-${contract.contract_number.toLowerCase()}-${crypto.randomBytes(3).toString('hex')}`;
+  // Not one another gallery holds or a renamed gallery's old slug leads from.
+  const slug = await require('../slugRedirects').unusedSlug(
+    () => `contract-${contract.contract_number.toLowerCase()}-${crypto.randomBytes(3).toString('hex')}`,
+  );
   const { shareLinkToStore } = await buildShareLinkVariants({ slug, shareToken });
   const candidate = {
     slug,
@@ -263,6 +273,9 @@ async function convertToEvent(contractId, adminId) {
     is_draft: true,
     created_by: adminId,
     quote_id: null,
+    // The gallery stays in the contract's project when the converter owns it
+    // (dropped below when the column is missing, like every other candidate key).
+    project_id: await require('../projectService').carriedProjectId(contract.project_id, adminId, { target: 'events' }),
     created_at: new Date(),
     updated_at: new Date(),
     // #1296 — a signed standalone contract converts straight to a gallery
@@ -275,28 +288,58 @@ async function convertToEvent(contractId, adminId) {
   for (const [k, v] of Object.entries(candidate)) {
     if (Object.prototype.hasOwnProperty.call(eventCols, k)) eventRow[k] = v;
   }
-  const inserted = await db('events').insert(eventRow).returning('id');
-  const eventId = typeof inserted[0] === 'object' ? inserted[0].id : inserted[0];
+  const hasAssignments = await db.schema.hasTable('event_customer_assignments');
 
-  // Link the customer so they see the event on their portal once
-  // the admin activates it. Best-effort — older installs without
-  // the junction table still get the event row.
-  try {
-    if (await db.schema.hasTable('event_customer_assignments')) {
-      await db('event_customer_assignments').insert({
-        event_id: eventId,
-        customer_account_id: customer.id,
-        assigned_by_admin_id: adminId,
-        assigned_at: new Date(),
-      });
+  const eventId = await db.transaction(async (trx) => {
+    // Claim the contract before creating anything, so two concurrent
+    // conversions make one gallery: on PostgreSQL the second waits on the
+    // row lock until the first commits and then matches nothing; SQLite
+    // serialises the transactions on its one connection.
+    if (hasContractConvertedEvent) {
+      const claimed = await auditedUpdate(trx, 'contracts',
+        (q) => q.where({ id: contractId, status: 'fully_signed' }).whereNull('converted_event_id'),
+        { updated_at: new Date() }, { actor: adminId, source: 'contract.convert.event' });
+      if (claimed !== 1) return null;
     }
-  } catch (_) { /* best-effort */ }
 
-  if (hasContractConvertedEvent) {
-    await auditedUpdate(db, 'contracts', { id: contractId }, {
-      converted_event_id: eventId,
-      updated_at: new Date(),
-    }, { actor: adminId, source: 'contract.convert.event' });
+    const inserted = await trx('events').insert(eventRow).returning('id');
+    const newEventId = typeof inserted[0] === 'object' ? inserted[0].id : inserted[0];
+
+    // Link the customer so they see the event on their portal once
+    // the admin activates it. Best-effort — older installs without
+    // the junction table still get the event row. In a savepoint, so a
+    // failed insert does not abort the transaction on PostgreSQL.
+    if (hasAssignments) {
+      try {
+        await trx.transaction(async (sp) => {
+          await sp('event_customer_assignments').insert({
+            event_id: newEventId,
+            customer_account_id: customer.id,
+            assigned_by_admin_id: adminId,
+            assigned_at: new Date(),
+          });
+        });
+      } catch (_) { /* best-effort */ }
+    }
+
+    if (hasContractConvertedEvent) {
+      await auditedUpdate(trx, 'contracts', { id: contractId }, {
+        converted_event_id: newEventId,
+        updated_at: new Date(),
+      }, { actor: adminId, source: 'contract.convert.event' });
+    }
+    return newEventId;
+  });
+
+  if (eventId == null) {
+    const current = await db('contracts').where({ id: contractId }).first();
+    if (current?.converted_event_id) {
+      return { eventId: current.converted_event_id, alreadyConverted: true };
+    }
+    throw new AppError(
+      `Cannot convert a contract with status '${current?.status}'. The contract must be fully signed by both parties first.`,
+      409, 'CONTRACT_NOT_FULLY_SIGNED',
+    );
   }
 
   try {

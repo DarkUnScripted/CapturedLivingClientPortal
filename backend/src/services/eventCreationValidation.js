@@ -4,7 +4,8 @@ const { AppError } = require('../utils/errors');
 const { normaliseEventTimeTriple } = require('./eventService');
 const optionalText = Joi.string().allow('', null);
 const schema = Joi.object({
-  event_name: Joi.string().trim().min(1).max(255).required(),
+  // NFC, like every other stored name: macOS input arrives decomposed.
+  event_name: Joi.string().trim().normalize('NFC').min(1).max(255).required(),
   event_type: Joi.string().trim().min(1).max(255).required(),
   event_date: Joi.string().isoDate().raw().allow('', null),
   expires_at: Joi.string().isoDate().raw().allow('', null),
@@ -33,7 +34,7 @@ const schema = Joi.object({
   ...Object.fromEntries(['is_draft', 'require_password', 'allow_downloads', 'allow_user_uploads',
     'disable_right_click', 'watermark_downloads', 'enable_devtools_protection', 'use_canvas_rendering',
     'feedback_enabled', 'allow_ratings', 'allow_likes', 'allow_comments', 'allow_favorites',
-    'allow_reactions', 'allow_color_labels', 'allow_decisions', 'require_name_email', 'moderate_comments',
+    'allow_reactions', 'allow_color_labels', 'allow_decisions', 'allow_selection_submit', 'allow_annotations', 'require_name_email', 'moderate_comments',
     'show_feedback_to_guests', 'client_access_enabled', 'og_image_share_enabled', 'show_credits_to_guests',
     'custom_theme_enabled', 'external_watch', 'import_now', 'review_contributor_uploads']
     .map(key => [key, Joi.boolean().truthy(1, '1').falsy(0, '0')])),

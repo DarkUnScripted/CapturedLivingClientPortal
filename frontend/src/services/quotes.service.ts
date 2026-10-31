@@ -63,6 +63,9 @@ export interface QuoteSummary {
   customerAccountId: number;
   /** Migration 121 — Project Overview link (null when unlinked). */
   projectId: number | null;
+  /** With `attachTo`: attaching it to that project takes something out of
+   *  another one (it, or a record of its deal, is in another project). */
+  attachMoves?: boolean;
   /** Migration 220 — quote-wide hours / days that bound lines follow. */
   hours?: number | null;
   days?: number | null;
@@ -82,6 +85,8 @@ export interface QuoteSummary {
      *  customer (no portal access). Drives the Passive badge in the
      *  editor pill + the quotes list. */
     isPassive?: boolean;
+    /** No administrative emails (migration 300): send becomes Issue. */
+    noAdminEmails?: boolean;
   };
   status: QuoteStatus;
   language: string;
@@ -293,6 +298,8 @@ export const quotesService = {
     sort?: QuoteSort;
     page?: number;
     pageSize?: number;
+    /** Adds `attachMoves` for this project to each row (the project page's add window). */
+    attachTo?: number;
   } = {}): Promise<QuoteListResponse> {
     const { data } = await api.get('/admin/quotes', {
       params: {

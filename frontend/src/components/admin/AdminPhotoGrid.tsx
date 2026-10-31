@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Check, ClipboardCheck, Download, Trash2, Eye, EyeOff, Heart, Package, MessageSquare, Star, Video, FolderOpen, FolderInput, Cog, AlertTriangle, RefreshCw, LayoutGrid, List, UserRound, X, ThumbsUp, ThumbsDown } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { radioGroupKeyDown } from '../../utils/ariaKeyboard';
+import { Check, ClipboardCheck, Download, Trash2, Eye, EyeOff, Heart, Package, MessageSquare, Star, Video, FolderOpen, FolderInput, Cog, AlertTriangle, RefreshCw, FileX, LayoutGrid, List, UserRound, X, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { COLOR_LABEL_SWATCHES, type ColorLabel } from '../../services/feedback.service';
 import { toast } from 'react-toastify';
 import { useQueryClient } from '@tanstack/react-query';
@@ -21,6 +22,8 @@ import { FolderPickerModal } from './folders/FolderPickerModal';
 import { invalidateFolderViews } from './folders/folderQueries';
 import type { GalleryFolder } from '../../services/folders.service';
 import { folderPathLabel } from '../../utils/folderTree';
+import { folderErrorMessage } from './folders/folderQueries';
+import { deleteManyConfirm, deleteOneConfirm, deletedMessage } from './photoDeleteCopy';
 
 interface CategoryOption {
   id: number;
@@ -35,6 +38,8 @@ interface AdminPhotoGridProps {
   eventId: number;
   onPhotoClick: (photo: AdminPhoto, index: number) => void;
   onPhotosDeleted: () => void;
+  /** When provided, the parent owns the selection shared with other actions. */
+  selectedPhotoIds?: number[];
   onSelectionChange?: (selectedIds: number[]) => void;
   categories?: CategoryOption[];
   /** The event's folders (issue 1786); "Move to folder" is offered when there are any. */
@@ -46,6 +51,8 @@ interface AdminPhotoGridProps {
   onSortChange?: (sort: PhotoSortKey, order: 'asc' | 'desc') => void;
   /** The gallery's owner may approve or reject team members' uploads (issue 743). */
   canModerate?: boolean;
+  /** Days a deleted photo stays in the trash (issue 1733); 0 or unknown: deleting is final. */
+  trashRetentionDays?: number;
 }
 
 // The moderation route takes this many photo ids per request (issue 743).
@@ -56,13 +63,15 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
   eventId,
   onPhotoClick,
   onPhotosDeleted,
+  selectedPhotoIds,
   onSelectionChange,
   categories = [],
   folders = [],
   sortBy,
   sortOrder,
   onSortChange,
-  canModerate = false
+  canModerate = false,
+  trashRetentionDays
 }) => {
   const { t } = useTranslation();
   const confirm = useConfirm();
@@ -70,7 +79,15 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
   const queryClient = useQueryClient();
   // The same test the tiles below use to tell a video from a photo.
   const videoCount = photos.filter(isVideoItem).length;
-  const [selectedPhotos, setSelectedPhotos] = useState<Set<number>>(new Set());
+  const [localSelectedPhotos, setLocalSelectedPhotos] = useState<Set<number>>(new Set());
+  const selectedPhotos = useMemo(
+    () => selectedPhotoIds === undefined ? localSelectedPhotos : new Set(selectedPhotoIds),
+    [selectedPhotoIds, localSelectedPhotos],
+  );
+  const setSelectedPhotos = (next: Set<number>) => {
+    if (selectedPhotoIds === undefined) setLocalSelectedPhotos(next);
+    onSelectionChange?.(Array.from(next));
+  };
   // Where a shift-click measures its range from: the last tile clicked without
   // the shift key (#1212). The index is what a range needs — a span of the
   // current ordering — but the id is carried with it so the anchor can prove
@@ -83,6 +100,17 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deletingPhotos, setDeletingPhotos] = useState<Set<number>>(new Set());
+  // A deleted photo's id is forgotten once it has left the list: restored
+  // from the trash it comes back under the same id, and must not come back
+  // dimmed and unclickable.
+  useEffect(() => {
+    setDeletingPhotos((prev) => {
+      if (prev.size === 0) return prev;
+      const present = new Set(photos.map((photo) => photo.id));
+      const next = new Set([...prev].filter((id) => present.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [photos]);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isUpdatingCategory, setIsUpdatingCategory] = useState(false);
   // Move to folder (issue 1786)
@@ -120,6 +148,14 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
   const RATING_SORT: ColumnMenuOption[] = [
     { value: 'rating:desc', label: t('admin.photos.sort.ratingHighest', 'Best rated first') },
     { value: 'rating:asc', label: t('admin.photos.sort.ratingLowest', 'Lowest rated first') },
+  ];
+  const ENGAGEMENT_SORT: ColumnMenuOption[] = [
+    { value: 'likes:desc', label: t('admin.photos.sort.likesMost', 'Most liked') },
+    { value: 'likes:asc', label: t('admin.photos.sort.likesFewest', 'Least liked') },
+    { value: 'favorites:desc', label: t('admin.photos.sort.favoritesMost', 'Most favorited') },
+    { value: 'favorites:asc', label: t('admin.photos.sort.favoritesFewest', 'Least favorited') },
+    { value: 'downloads:desc', label: t('admin.photos.sort.downloadsMost', 'Most downloaded') },
+    { value: 'downloads:asc', label: t('admin.photos.sort.downloadsFewest', 'Least downloaded') },
   ];
   const SIZE_SORT: ColumnMenuOption[] = [
     { value: 'size:desc', label: t('admin.photos.sort.sizeLargest', 'Largest first') },
@@ -197,7 +233,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
         if (photo) newSelected.add(photo.id);
       }
       setSelectedPhotos(newSelected);
-      onSelectionChange?.(Array.from(newSelected));
       // Anchor deliberately left where it was, so a second shift-click
       // re-aims the same range from the original point rather than walking
       // the anchor along behind the cursor.
@@ -211,7 +246,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
     }
     if (index !== undefined) setAnchor({ index, photoId });
     setSelectedPhotos(newSelected);
-    onSelectionChange?.(Array.from(newSelected));
   };
 
   const handleSelectAll = () => {
@@ -227,14 +261,13 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       newSelected = new Set(photos.map(p => p.id));
     }
     setSelectedPhotos(newSelected);
-    onSelectionChange?.(Array.from(newSelected));
   };
 
   const handleDeleteSingle = async (photo: AdminPhoto, e: React.MouseEvent) => {
     e.stopPropagation();
     
     if (!(await confirm({
-      message: t('admin.photos.deleteOneConfirm', 'Delete "{{name}}"? The photo is removed from the gallery for good. This cannot be undone.', { name: photo.filename }),
+      message: deleteOneConfirm(t, photo.filename, trashRetentionDays),
       variant: 'danger',
       confirmLabel: t('admin.photos.deleteOneAction', 'Delete photo'),
     }))) {
@@ -243,8 +276,8 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
 
     setDeletingPhotos(prev => new Set(prev).add(photo.id));
     try {
-      await photosService.deletePhoto(eventId, photo.id);
-      toast.success('Photo deleted successfully');
+      const result = await photosService.deletePhoto(eventId, photo.id);
+      toast.success(deletedMessage(t, 1, result));
       onPhotosDeleted();
     } catch {
       toast.error('Failed to delete photo');
@@ -261,7 +294,7 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
 
     const count = selectedPhotos.size;
     if (!(await confirm({
-      message: t('admin.photos.deleteManyConfirm', 'Delete {{count}} photos? They are removed from the gallery. This cannot be undone.', { count }),
+      message: deleteManyConfirm(t, count, trashRetentionDays),
       variant: 'danger',
       confirmLabel: t('admin.photos.deleteManyAction', 'Delete {{count}} photos', { count }),
     }))) {
@@ -273,12 +306,18 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
     setDeletingPhotos(new Set(selectedIds));
     
     try {
-      await photosService.deletePhotos(eventId, selectedIds);
-      toast.success(`${count} photo${count > 1 ? 's' : ''} deleted successfully`);
+      const result = await photosService.deletePhotos(eventId, selectedIds);
+      const failed = result?.failed?.length ?? 0;
+      if (failed < count) toast.success(deletedMessage(t, count - failed, result));
+      // Still in the gallery: the refreshed grid shows which.
+      if (failed > 0) {
+        toast.error(t('admin.photos.trash.deleteFailed', { count: failed }));
+        // They stay in the gallery, and usable.
+        setDeletingPhotos(new Set(selectedIds.filter((id) => !result.failed!.includes(id))));
+      }
       setSelectedPhotos(new Set());
       setAnchor(null);
       setIsSelectionMode(false);
-      onSelectionChange?.([]);
       onPhotosDeleted();
     } catch {
       toast.error('Failed to delete photos');
@@ -303,7 +342,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
     if (isSelectionMode) {
       setSelectedPhotos(new Set());
       setAnchor(null);
-      onSelectionChange?.([]);
     }
   };
 
@@ -327,7 +365,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       setSelectedPhotos(new Set());
       setAnchor(null);
       setIsSelectionMode(false);
-      onSelectionChange?.([]);
       setIsCategoryModalOpen(false);
       onPhotosDeleted(); // Refresh the photo list
     } catch {
@@ -352,13 +389,11 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       setSelectedPhotos(new Set());
       setAnchor(null);
       setIsSelectionMode(false);
-      onSelectionChange?.([]);
       setIsFolderModalOpen(false);
       invalidateFolderViews(queryClient, eventId);
       onPhotosDeleted(); // Refresh the photo list
     } catch (error: unknown) {
-      const e = error as { response?: { data?: { error?: string } } };
-      toast.error(e.response?.data?.error || t('photos.folders.moveFailed', 'The photos could not be moved'));
+      toast.error(folderErrorMessage(error, t) || t('photos.folders.moveFailed', 'The photos could not be moved'));
     } finally {
       setIsMovingToFolder(false);
     }
@@ -383,7 +418,6 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       setSelectedPhotos(new Set());
       setAnchor(null);
       setIsSelectionMode(false);
-      onSelectionChange?.([]);
       queryClient.invalidateQueries({ queryKey: ['admin-event-photos'] });
       onPhotosDeleted(); // Refresh the photo list
     } catch (error: unknown) {
@@ -403,7 +437,13 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       : (pending
         ? 'bg-warning-soft text-warning-text'
         : 'bg-danger-soft text-danger-text');
-    const uploader = photo.uploaded_by_admin?.username;
+    // Whose upload it is: a guest's (issue 1733), named when the gallery
+    // asks guests for a name, or a team member's.
+    const fromGuest = photo.uploaded_by === 'guest';
+    const uploader = fromGuest ? photo.credit_name : photo.uploaded_by_admin?.username;
+    const source = fromGuest
+      ? t('photos.review.sourceGuest', 'Guest')
+      : (uploader ? t('photos.review.sourceTeam', 'Team') : null);
     return (
       <span
         className={`inline-flex max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${colors}`}
@@ -414,7 +454,9 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
       >
         <ClipboardCheck className="w-3 h-3 shrink-0" />
         <span className="shrink-0">{pending ? t('photos.review.pendingBadge', 'Pending review') : t('photos.review.rejectedBadge', 'Rejected')}</span>
-        {uploader && <span className="min-w-0 truncate font-normal opacity-90">· {uploader}</span>}
+        {/* The source always shows; on a narrow tile only the name gives way. */}
+        {source && <span className="shrink-0 font-normal opacity-90" data-testid={`admin-photo-review-source-${photo.id}`}>· {source}</span>}
+        {source && uploader && <span className="min-w-0 truncate font-normal opacity-90">· {uploader}</span>}
       </span>
     );
   };
@@ -581,12 +623,13 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
           </div>
           {/* Layout toggle: Grid / List — radiogroup so a screen reader
               announces the two options as one mutually-exclusive set. */}
-          <div className="inline-flex rounded-lg border border-line-strong overflow-hidden" role="radiogroup" aria-label={t('admin.photos.viewMode', 'View mode')}>
+          <div className="inline-flex rounded-lg border border-line-strong overflow-hidden" role="radiogroup" aria-label={t('admin.photos.viewMode', 'View mode')} onKeyDown={radioGroupKeyDown}>
             <button
               type="button"
               role="radio"
               onClick={() => selectView('grid')}
               aria-checked={viewMode === 'grid'}
+              tabIndex={viewMode === 'grid' ? 0 : -1}
               title={t('admin.photos.gridView', 'Grid view')}
               className={`p-1.5 transition-colors ${
                 viewMode === 'grid'
@@ -601,6 +644,7 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
               role="radio"
               onClick={() => selectView('list')}
               aria-checked={viewMode === 'list'}
+              tabIndex={viewMode === 'list' ? 0 : -1}
               title={t('admin.photos.listView', 'List view')}
               className={`p-1.5 transition-colors border-l border-line-strong ${
                 viewMode === 'list'
@@ -629,6 +673,8 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
             (photo.mime_type && photo.mime_type.startsWith('video/')) ||
             photo.type === 'video';
           const isHidden = (photo as any).visibility === 'hidden';
+          // File gone from the external folder (issue 2121).
+          const isMissing = photo.unavailable_reason === 'source_missing';
           return (
             <div
               key={photo.id}
@@ -668,18 +714,30 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
                 {reviewBadge(photo, 'solid')}
               </div>
             )}
-            {isHidden && !photo.moderation_status && (
-              <div
-                className="absolute top-2 left-2 z-20"
-                data-testid={`admin-photo-hidden-badge-${photo.id}`}
-              >
-                <span
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-danger text-white text-[10px] font-medium"
-                  title={t('admin.photos.hiddenTooltip', 'Hidden from guests — this photo is not shown in the client gallery.') as string}
-                >
-                  <EyeOff className="w-3 h-3" />
-                  {t('admin.photos.hidden', 'Hidden')}
-                </span>
+            {(isHidden || isMissing) && !photo.moderation_status && (
+              <div className="absolute top-2 left-2 z-20 flex max-w-[calc(100%-3rem)] gap-1">
+                {isMissing && (
+                  <div data-testid={`admin-photo-missing-badge-${photo.id}`}>
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-warning text-white text-[10px] font-medium whitespace-nowrap"
+                      title={t('admin.photos.fileMissingTooltip', 'The file is no longer in the external folder. Guests do not see this photo; it comes back when the file does. Delete it if the file is gone for good.') as string}
+                    >
+                      <FileX className="w-3 h-3" />
+                      {t('admin.photos.fileMissing', 'File missing')}
+                    </span>
+                  </div>
+                )}
+                {isHidden && (
+                  <div data-testid={`admin-photo-hidden-badge-${photo.id}`}>
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-danger text-white text-[10px] font-medium"
+                      title={t('admin.photos.hiddenTooltip', 'Hidden from guests — this photo is not shown in the client gallery.') as string}
+                    >
+                      <EyeOff className="w-3 h-3" />
+                      {t('admin.photos.hidden', 'Hidden')}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -784,7 +842,7 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
 
             {/* Category Badge - move to top-left and prevent overlap with select checkbox */}
             {defaultCategoryLabel(t, photo) && (
-              <div className={`absolute left-2 ${isHidden ? 'top-9' : 'top-2'} pointer-events-none`}>
+              <div className={`absolute left-2 ${isHidden || isMissing ? 'top-9' : 'top-2'} pointer-events-none`}>
                 <span className="px-2 py-1 text-xs font-medium bg-white/90 text-body rounded max-w-[70%] whitespace-nowrap overflow-hidden text-ellipsis">
                   {defaultCategoryLabel(t, photo)}
                 </span>
@@ -945,7 +1003,7 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
               {listHeader(t('admin.photos.columns.category', 'Category'), 'hidden lg:table-cell px-3 py-2', 'left')}
               {listHeader(t('admin.photos.columns.credit'), 'hidden lg:table-cell px-3 py-2', 'left')}
               {listHeader(t('admin.photos.columns.uploaded', 'Uploaded'), 'hidden md:table-cell px-3 py-2', 'left', UPLOADED_SORT, t('gallery.sortByDate', 'Sort by Date'))}
-              {listHeader(t('admin.photos.columns.engagement', 'Engagement'), 'hidden xl:table-cell px-3 py-2', 'right')}
+              {listHeader(t('admin.photos.columns.engagement', 'Engagement'), 'hidden xl:table-cell px-3 py-2', 'right', ENGAGEMENT_SORT, t('admin.photos.sort.engagement', 'Sort by Engagement'))}
               {listHeader(t('admin.photos.columns.feedback', 'Feedback'), 'hidden sm:table-cell px-3 py-2', 'right', RATING_SORT, t('gallery.sortByRating', 'Sort by Rating'))}
               {listHeader(t('admin.photos.columns.size', 'Size'), 'px-3 py-2', 'right', SIZE_SORT, t('gallery.sortBySize', 'Sort by Size'))}
               {listHeader(t('admin.photos.columns.actions', 'Actions'), 'w-px px-3 py-2', 'right')}
@@ -964,6 +1022,7 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
                 (photo.mime_type && photo.mime_type.startsWith('video/')) ||
                 photo.type === 'video';
               const isHidden = (photo as any).visibility === 'hidden';
+              const isMissing = photo.unavailable_reason === 'source_missing';
               const status = (photo as any).processing_status;
               return (
                 <tr
@@ -1063,6 +1122,17 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
                           {photo.moderation_status && (
                             <span className="flex-shrink-0">{reviewBadge(photo, 'soft')}</span>
                           )}
+                          {isMissing && (
+                            <span className="flex-shrink-0" data-testid={`admin-photo-missing-badge-${photo.id}`}>
+                              <Badge
+                                tone="warning"
+                                icon={<FileX />}
+                                title={t('admin.photos.fileMissingTooltip', 'The file is no longer in the external folder. Guests do not see this photo; it comes back when the file does. Delete it if the file is gone for good.') as string}
+                              >
+                                {t('admin.photos.fileMissing', 'File missing')}
+                              </Badge>
+                            </span>
+                          )}
                           {isHidden && !photo.moderation_status && (
                             <Badge
                               tone="danger"
@@ -1109,7 +1179,7 @@ export const AdminPhotoGrid: React.FC<AdminPhotoGridProps> = ({
                         <Eye className="w-3.5 h-3.5" />
                         {viewCount}
                       </span>
-                      <span className="inline-flex items-center gap-1" title={t('admin.photos.columns.downloads', 'Downloads')}>
+                      <span className="inline-flex items-center gap-1" title={t('admin.photos.columns.downloadsHint', 'Downloads (a zip counts once for every photo in it)')}>
                         <Download className="w-3.5 h-3.5" />
                         {downloadCount}
                       </span>
